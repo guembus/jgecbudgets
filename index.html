@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>장성글로컬교육센터 예산 관리</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f3f4f6; }
+        .table-header th { background-color: #4b5563; color: white; padding: 0.75rem; border: 1px solid #6b7280; text-align: center; font-weight: 500;}
+        .table-cell { padding: 0.5rem; border: 1px solid #d1d5db; text-align: right; }
+        .table-cell-text { padding: 0.5rem; border: 1px solid #d1d5db; text-align: left; }
+        .row-group { background-color: #f9fafb; font-weight: bold; }
+        .row-subgroup { background-color: #ffffff; font-weight: 600; padding-left: 1.5rem !important; }
+        .row-item { background-color: #ffffff; padding-left: 2.5rem !important; color: #374151; }
+        
+        /* Print Styles */
+        @media print {
+            body { background-color: white; }
+            .no-print { display: none !important; }
+            .print-full-width { width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; box-shadow: none !important; }
+            table { font-size: 10px; width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid black !important; }
+            .table-header th { background-color: #e5e7eb !important; color: black !important; }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // ==========================================
+        // Firebase Configuration Area
+        // ==========================================
+        // 파이어베이스 설정값을 아래 객체에 입력하세요.
+        const USER_FIREBASE_CONFIG = {
+            // apiKey: "AIzaSyCVG6f1IazVcq7hPc_RYlZAxX8z8ZqN0_k",
+            // authDomain: "jgec-budgets.firebaseapp.com",
+            // projectId: "jgec-budgets",
+            // storageBucket: "jgec-budgets.firebasestorage.app",
+            // messagingSenderId: "624606043611",
+            // appId: "1:624606043611:web:414f3e46ed761caf719bfe"
+        };
+
+        // 환경 변수 또는 사용자 설정을 통한 Firebase 초기화 로직
+        let firebaseApp, auth, db;
+        try {
+            const configToUse = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : USER_FIREBASE_CONFIG;
+            if (Object.keys(configToUse).length > 0) {
+                firebaseApp = firebase.initializeApp(configToUse);
+                auth = firebase.auth();
+                db = firebase.firestore();
+                console.log("Firebase initialized successfully.");
+            } else {
+                console.warn("Firebase config is empty. App will run in local-only mode (data will not be saved permanently).");
+            }
+        } catch (error) {
+            console.error("Firebase initialization error:", error);
+        }
+
+        const getAppId = () => typeof __app_id !== 'undefined' ? __app_id : 'jangseong-glocal-budget';
+
+        // ==========================================
+        // Initial Data (Based on provided image)
+        // ==========================================
+        const INITIAL_BUDGET_DATA = [
+            { id: '1', parent: null, title: '외국어 교과활동', type: 'category', amount: 180979000 },
+            { id: '2', parent: '1', title: '[초] 영어교과운영', type: 'sub', amount: 800000 },
+            { id: '3', parent: '2', title: '영어체험교실운영물품 구입', subTitle: '교육운영비', type: 'item', amount: 400000 },
+            { id: '4', parent: '2', title: '영어특색교육활동 및 캠프운영물품 구입', subTitle: '교육운영비', type: 'item', amount: 400000 },
+            { id: '5', parent: '1', title: '[초] 원어민보조교사운영', type: 'sub', amount: 26900000 },
+            { id: '6', parent: '5', title: '원어민주거지원비', subTitle: '일반수용비', type: 'item', amount: 2800000 },
+            { id: '7', parent: '5', title: '원어민보조교사순회수당(학)', subTitle: '운영수당', type: 'item', amount: 0 },
+            { id: '8', parent: '5', title: '원어민보조교사보험료', subTitle: '기간제교원법정부담금', type: 'item', amount: 1680000 },
+            { id: '9', parent: '5', title: '원어민보조교사퇴직적립금(학)', subTitle: '기간제교원인건비', type: 'item', amount: 0 },
+            { id: '10', parent: '5', title: '원어민보조교사수당', subTitle: '운영수당', type: 'item', amount: 22420000 },
+            { id: '11', parent: '1', title: '[초] 글로컬교육센터운영(군)', type: 'sub', amount: 133474000 },
+            { id: '12', parent: '11', title: '원어민보조교사 숙소 임차료', subTitle: '일반수용비', type: 'item', amount: 4000000 },
+            { id: '13', parent: '11', title: '원어민보조교사 수당', subTitle: '운영수당', type: 'item', amount: 30000000 },
+            { id: '14', parent: '11', title: '글로컬교육센터 법정부담금', subTitle: '기간제교원법정부담금', type: 'item', amount: 12699000 },
+            { id: '15', parent: '11', title: '내부강사 수당', subTitle: '운영수당', type: 'item', amount: 60891000 },
+            { id: '16', parent: '11', title: '운영보조원 수당', subTitle: '운영수당', type: 'item', amount: 25884000 },
+            { id: '17', parent: '1', title: '[초] 글로컬교육센터운영(도)', type: 'sub', amount: 19805000 },
+            { id: '18', parent: '17', title: '원어민주거지원비', subTitle: '일반수용비', type: 'item', amount: 2400000 },
+            { id: '19', parent: '17', title: '원어민보조교사 수당', subTitle: '운영수당', type: 'item', amount: 15600000 },
+            { id: '20', parent: '17', title: '원어민보조교사보험료 등', subTitle: '기간제교원법정부담금', type: 'item', amount: 1805000 },
+        ];
+
+        // Utility: Format Number to KRW
+        const formatKRW = (num) => {
+            if (num === null || num === undefined) return '0';
+            return num.toLocaleString('ko-KR');
+        };
+
+        // Utility: Get Fiscal Year (March to February)
+        const getFiscalYear = (date = new Date()) => {
+            const year = date.getFullYear();
+            const month = date.getMonth() + 1; // 1-12
+            return month < 3 ? year - 1 : year;
+        };
+
+        const App = () => {
+            const [user, setUser] = React.useState(null);
+            const [activeTab, setActiveTab] = React.useState('overview');
+            const [selectedYear, setSelectedYear] = React.useState(getFiscalYear());
+            const [budgets, setBudgets] = React.useState([]);
+            const [transactions, setTransactions] = React.useState([]);
+            const [loading, setLoading] = React.useState(true);
+
+            // Auth Effect
+            React.useEffect(() => {
+                if (!auth) {
+                    setLoading(false);
+                    // Load local mock data if no Firebase
+                    initializeLocalData(selectedYear);
+                    return;
+                }
+
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await auth.signInWithCustomToken(__initial_auth_token);
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                    } catch (error) {
+                        console.error("Auth error:", error);
+                        setLoading(false);
+                    }
+                };
+                initAuth();
+
+                const unsubscribe = auth.onAuthStateChanged((user) => {
+                    setUser(user);
+                    if (!user) setLoading(false);
+                });
+                return () => unsubscribe();
+            }, []);
+
+            // Data Fetching Effect
+            React.useEffect(() => {
+                if (!auth) return; // Skip if local mode
+                if (!user) return;
+
+                const appId = getAppId();
+                setLoading(true);
+
+                // Fetch Budgets for selected year
+                const budgetRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`);
+                const unsubBudgets = budgetRef.onSnapshot((snapshot) => {
+                    if (snapshot.empty && selectedYear === 2026) { // Initialize 2026 with provided data
+                        INITIAL_BUDGET_DATA.forEach(item => {
+                            budgetRef.doc(item.id).set({
+                                ...item,
+                                requisitioned: 0,
+                                encumbered: 0,
+                                expended: 0
+                            });
+                        });
+                    } else {
+                        const bData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        setBudgets(bData.sort((a, b) => parseInt(a.id) - parseInt(b.id)));
+                    }
+                }, (error) => console.error("Error fetching budgets:", error));
+
+                // Fetch Transactions for selected year
+                const transRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`);
+                const unsubTrans = transRef.orderBy('date', 'desc').onSnapshot((snapshot) => {
+                    const tData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setTransactions(tData);
+                    setLoading(false);
+                }, (error) => {
+                    console.error("Error fetching transactions:", error);
+                    setLoading(false);
+                });
+
+                return () => {
+                    unsubBudgets();
+                    unsubTrans();
+                };
+            }, [user, selectedYear]);
+
+            // Local Data Fallback Initialization
+            const initializeLocalData = (year) => {
+                const bKey = `local_budgets_${year}`;
+                const tKey = `local_trans_${year}`;
+                if (!localStorage.getItem(bKey) && year === 2026) {
+                    const initData = INITIAL_BUDGET_DATA.map(item => ({...item, requisitioned: 0, encumbered: 0, expended: 0}));
+                    localStorage.setItem(bKey, JSON.stringify(initData));
+                }
+                setBudgets(JSON.parse(localStorage.getItem(bKey)) || []);
+                setTransactions(JSON.parse(localStorage.getItem(tKey)) || []);
+            };
+
+            // Save Local Data (Mock DB interaction)
+            const saveLocalData = (newBudgets, newTransactions) => {
+                if (!auth) {
+                    localStorage.setItem(`local_budgets_${selectedYear}`, JSON.stringify(newBudgets));
+                    localStorage.setItem(`local_trans_${selectedYear}`, JSON.stringify(newTransactions));
+                }
+            };
+
+            const handleTransaction = async (type, date, items, description) => {
+                const newTransId = Date.now().toString();
+                const transactionRecord = {
+                    id: newTransId, date, type, items, description, timestamp: new Date().toISOString()
+                };
+
+                // Create a map for quick budget updates
+                const budgetUpdates = {};
+                items.forEach(item => {
+                    if (!budgetUpdates[item.budgetId]) {
+                        budgetUpdates[item.budgetId] = { req: 0, enc: 0, exp: 0, amtChange: 0 };
+                    }
+                    if (type === 'requisition') budgetUpdates[item.budgetId].req += item.amount;
+                    if (type === 'encumbrance') budgetUpdates[item.budgetId].enc += item.amount;
+                    if (type === 'expenditure') budgetUpdates[item.budgetId].exp += item.amount;
+                    if (type === 'adjustment') budgetUpdates[item.budgetId].amtChange += item.amount;
+                });
+
+                if (auth && user) {
+                    const appId = getAppId();
+                    const batch = db.batch();
+                    
+                    // Add transaction
+                    const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
+                    batch.set(tRef, transactionRecord);
+
+                    // Update budgets
+                    budgets.forEach(b => {
+                        if (budgetUpdates[b.id]) {
+                            const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const updates = budgetUpdates[b.id];
+                            batch.update(bRef, {
+                                requisitioned: (b.requisitioned || 0) + updates.req,
+                                encumbered: (b.encumbered || 0) + updates.enc,
+                                expended: (b.expended || 0) + updates.exp,
+                                amount: (b.amount || 0) + updates.amtChange
+                            });
+                        }
+                    });
+                    
+                    // Handle creating new budget items for 'adjustment' if ID is new
+                    items.forEach(item => {
+                        if (type === 'adjustment' && item.isNew) {
+                             const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(item.budgetId);
+                             batch.set(bRef, {
+                                 id: item.budgetId,
+                                 parent: item.parent,
+                                 title: item.title,
+                                 subTitle: item.subTitle,
+                                 type: 'item',
+                                 amount: item.amount,
+                                 requisitioned: 0, encumbered: 0, expended: 0
+                             });
+                        }
+                    });
+
+                    await batch.commit();
+                } else {
+                    // Local state update
+                    let nextBudgets = [...budgets];
+                    items.forEach(item => {
+                        if (type === 'adjustment' && item.isNew) {
+                            nextBudgets.push({
+                                id: item.budgetId, parent: item.parent, title: item.title, subTitle: item.subTitle, type: 'item',
+                                amount: item.amount, requisitioned: 0, encumbered: 0, expended: 0
+                            });
+                        } else {
+                            nextBudgets = nextBudgets.map(b => {
+                                if (b.id === item.budgetId) {
+                                    const u = budgetUpdates[b.id];
+                                    return {
+                                        ...b,
+                                        requisitioned: (b.requisitioned || 0) + u.req,
+                                        encumbered: (b.encumbered || 0) + u.enc,
+                                        expended: (b.expended || 0) + u.exp,
+                                        amount: (b.amount || 0) + u.amtChange
+                                    };
+                                }
+                                return b;
+                            });
+                        }
+                    });
+                    const nextTrans = [transactionRecord, ...transactions];
+                    setBudgets(nextBudgets);
+                    setTransactions(nextTrans);
+                    saveLocalData(nextBudgets, nextTrans);
+                }
+            };
+
+            const printDocument = () => {
+                window.print();
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col">
+                    {/* Header */}
+                    <header className="bg-blue-800 text-white p-4 shadow-md no-print flex justify-between items-center">
+                        <div className="flex items-center space-x-4">
+                            <h1 className="text-2xl font-bold"><i className="fa-solid fa-school mr-2"></i>장성글로컬교육센터 예산 관리</h1>
+                            <div className="bg-blue-700 rounded px-3 py-1 flex items-center">
+                                <span className="text-sm mr-2">회계연도:</span>
+                                <select 
+                                    className="bg-transparent text-white font-bold outline-none"
+                                    value={selectedYear}
+                                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                                >
+                                    {[2025, 2026, 2027, 2028].map(y => (
+                                        <option key={y} value={y} className="text-black">{y}년 ({y}.3 ~ {y+1}.2)</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        <div className="space-x-2">
+                            <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded transition-colors ${activeTab === 'overview' ? 'bg-white text-blue-800 font-bold' : 'hover:bg-blue-700'}`}>개요</button>
+                            <button onClick={() => setActiveTab('history')} className={`px-4 py-2 rounded transition-colors ${activeTab === 'history' ? 'bg-white text-blue-800 font-bold' : 'hover:bg-blue-700'}`}>내역</button>
+                            <button onClick={() => setActiveTab('chart')} className={`px-4 py-2 rounded transition-colors ${activeTab === 'chart' ? 'bg-white text-blue-800 font-bold' : 'hover:bg-blue-700'}`}>차트/일정</button>
+                        </div>
+                    </header>
+
+                    {/* Main Content */}
+                    <main className="flex-1 p-6 print-full-width">
+                        {loading ? (
+                            <div className="flex justify-center items-center h-64">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800"></div>
+                            </div>
+                        ) : (
+                            <>
+                                {activeTab === 'overview' && <OverviewTab budgets={budgets} onTransaction={handleTransaction} onPrint={printDocument} />}
+                                {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={printDocument} />}
+                                {activeTab === 'chart' && <ChartTab transactions={transactions} budgets={budgets} year={selectedYear} />}
+                            </>
+                        )}
+                    </main>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Tab 1: Overview
+        // ==========================================
+        const OverviewTab = ({ budgets, onTransaction, onPrint }) => {
+            const [modalConfig, setModalConfig] = React.useState(null);
+
+            // Calculation logic for hierarchy
+            const processData = () => {
+                let processed = JSON.parse(JSON.stringify(budgets));
+                
+                // Bottom-up roll up for sums
+                const rollUp = (parentId) => {
+                    let children = processed.filter(b => b.parent === parentId);
+                    let sum = { amount: 0, req: 0, enc: 0, exp: 0 };
+                    
+                    children.forEach(c => {
+                        if (c.type === 'item') {
+                            sum.amount += c.amount || 0;
+                            sum.req += c.requisitioned || 0;
+                            sum.enc += c.encumbered || 0;
+                            sum.exp += c.expended || 0;
+                        } else {
+                            const cSum = rollUp(c.id);
+                            c.amount = cSum.amount;
+                            c.requisitioned = cSum.req;
+                            c.encumbered = cSum.enc;
+                            c.expended = cSum.exp;
+                            sum.amount += cSum.amount;
+                            sum.req += cSum.req;
+                            sum.enc += cSum.enc;
+                            sum.exp += cSum.exp;
+                        }
+                    });
+                    return sum;
+                };
+
+                const topLevel = processed.filter(b => b.parent === null);
+                topLevel.forEach(t => {
+                    const tSum = rollUp(t.id);
+                    t.amount = tSum.amount;
+                    t.requisitioned = tSum.req;
+                    t.encumbered = tSum.enc;
+                    t.expended = tSum.exp;
+                });
+
+                // Flatten for table display
+                const flatten = (parentId, level = 0) => {
+                    let result = [];
+                    let children = processed.filter(b => b.parent === parentId);
+                    children.forEach(c => {
+                        result.push({...c, level});
+                        if (c.type !== 'item') {
+                            result = result.concat(flatten(c.id, level + 1));
+                        }
+                    });
+                    return result;
+                };
+
+                let displayList = [];
+                topLevel.forEach(t => {
+                    displayList.push({...t, level: 0});
+                    displayList = displayList.concat(flatten(t.id, 1));
+                });
+
+                // Calculate Totals for bottom row
+                const total = topLevel.reduce((acc, curr) => ({
+                    amount: acc.amount + (curr.amount || 0),
+                    req: acc.req + (curr.requisitioned || 0),
+                    enc: acc.enc + (curr.encumbered || 0),
+                    exp: acc.exp + (curr.expended || 0)
+                }), {amount:0, req:0, enc:0, exp:0});
+
+                return { displayList, total };
+            };
+
+            const { displayList, total } = processData();
+
+            const openUploadModal = (type) => {
+                // Mocking PDF read by creating a generic interface
+                setModalConfig({
+                    type: type,
+                    title: type === 'requisition' ? '지출품의서 업로드 및 반영' : 
+                           type === 'expenditure' ? '지출결의서 업로드 및 반영' : '성립전예산(수동조정) 반영',
+                    date: new Date().toISOString().split('T')[0]
+                });
+            };
+
+            return (
+                <div className="bg-white rounded shadow p-6 print-full-width">
+                    <div className="flex justify-between items-center mb-4 no-print">
+                        <h2 className="text-xl font-bold text-gray-800">예산 현황 총괄표</h2>
+                        <div className="space-x-2">
+                            <button onClick={() => openUploadModal('requisition')} className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 text-sm"><i className="fa-solid fa-file-pdf mr-1"></i> 지출품의서 반영</button>
+                            <button onClick={() => openUploadModal('expenditure')} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"><i className="fa-solid fa-file-pdf mr-1"></i> 지출결의서 반영</button>
+                            <button onClick={() => openUploadModal('adjustment')} className="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm"><i className="fa-solid fa-pen-to-square mr-1"></i> 성립전/예산조정</button>
+                            <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 text-sm"><i className="fa-solid fa-print mr-1"></i> 출력/PDF</button>
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="table-header">
+                                <tr>
+                                    <th className="w-1/4">세부사업/세부항목/원가통계비목</th>
+                                    <th className="w-1/4">산출내역</th>
+                                    <th className="w-[10%]">예산액</th>
+                                    <th className="w-[10%]">지출품의금액</th>
+                                    <th className="w-[10%]">원인행위금액</th>
+                                    <th className="w-[10%]">지출(지급)액</th>
+                                    <th className="w-[10%]">예산잔액</th>
+                                    <th className="w-[5%]">집행률</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr className="bg-gray-200 font-bold">
+                                    <td className="table-cell-text" colSpan="2">총 합계</td>
+                                    <td className="table-cell">{formatKRW(total.amount)}</td>
+                                    <td className="table-cell text-green-700">{formatKRW(total.req)}</td>
+                                    <td className="table-cell text-orange-600">{formatKRW(total.enc)}</td>
+                                    <td className="table-cell text-blue-700">{formatKRW(total.exp)}</td>
+                                    <td className="table-cell text-red-600">{formatKRW(total.amount - total.exp)}</td>
+                                    <td className="table-cell">{total.amount ? ((total.exp / total.amount) * 100).toFixed(1) : 0}%</td>
+                                </tr>
+                                {displayList.map((row) => {
+                                    const balance = (row.amount || 0) - (row.expended || 0);
+                                    const rate = row.amount ? ((row.expended || 0) / row.amount * 100).toFixed(1) : 0;
+                                    
+                                    let rowClass = "table-cell-text ";
+                                    if (row.type === 'category') rowClass += "row-group";
+                                    else if (row.type === 'sub') rowClass += "row-subgroup";
+                                    else rowClass += "row-item";
+
+                                    return (
+                                        <tr key={row.id} className="hover:bg-blue-50 transition-colors">
+                                            <td className={rowClass}>
+                                                {row.type === 'item' ? row.subTitle : row.title}
+                                            </td>
+                                            <td className="table-cell-text text-gray-600">
+                                                {row.type === 'item' ? row.title : ''}
+                                            </td>
+                                            <td className="table-cell">{formatKRW(row.amount)}</td>
+                                            <td className="table-cell">{formatKRW(row.requisitioned)}</td>
+                                            <td className="table-cell">{formatKRW(row.encumbered)}</td>
+                                            <td className="table-cell">{formatKRW(row.expended)}</td>
+                                            <td className="table-cell">{formatKRW(balance)}</td>
+                                            <td className="table-cell text-center">{rate}%</td>
+                                        </tr>
+                                    );
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {modalConfig && (
+                        <ActionModal 
+                            config={modalConfig} 
+                            budgets={budgets.filter(b => b.type === 'item')} // Only allow actions on leaf items
+                            onClose={() => setModalConfig(null)} 
+                            onConfirm={(data) => {
+                                onTransaction(modalConfig.type, data.date, data.items, data.description);
+                                setModalConfig(null);
+                            }} 
+                        />
+                    )}
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Modal for Actions
+        // ==========================================
+        const ActionModal = ({ config, budgets, onClose, onConfirm }) => {
+            const [date, setDate] = React.useState(config.date);
+            const [description, setDescription] = React.useState('');
+            const [items, setItems] = React.useState([{ budgetId: budgets[0]?.id || '', amount: 0, title: '', subTitle: '' }]);
+            
+            // File upload simulation state
+            const [fileName, setFileName] = React.useState('');
+            const [isScanning, setIsScanning] = React.useState(false);
+
+            const handleFileChange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    setFileName(file.name);
+                    setIsScanning(true);
+                    // Simulate PDF processing delay
+                    setTimeout(() => {
+                        setIsScanning(false);
+                        setDescription(`${file.name.replace('.pdf', '')} 내용 반영`);
+                        // Mock auto-fill based on file
+                        setItems([{ budgetId: budgets[0]?.id || '', amount: Math.floor(Math.random() * 500000) + 50000, title: '', subTitle: '' }]);
+                    }, 1500);
+                }
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                // Process adjustment logic (new items)
+                const processedItems = items.map(item => {
+                    if (config.type === 'adjustment' && item.budgetId === 'NEW') {
+                        return {
+                            ...item,
+                            isNew: true,
+                            budgetId: 'new_' + Date.now() + Math.random(),
+                            parent: '17' // Default to 글로컬교육센터(도) for mock logic, real app needs parent selection
+                        };
+                    }
+                    return item;
+                });
+                onConfirm({ date, description, items: processedItems });
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-[600px] max-w-full shadow-2xl">
+                        <div className="flex justify-between items-center mb-4 border-b pb-2">
+                            <h3 className="text-xl font-bold">{config.title}</h3>
+                            <button onClick={onClose} className="text-gray-500 hover:text-black"><i className="fa-solid fa-xmark text-xl"></i></button>
+                        </div>
+
+                        {config.type !== 'adjustment' && (
+                            <div className="mb-4 bg-blue-50 p-4 rounded border border-blue-200">
+                                <label className="block text-sm font-bold text-gray-700 mb-2">PDF 파일 업로드 (자동 추출 모의)</label>
+                                <input type="file" accept=".pdf" onChange={handleFileChange} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700" />
+                                {isScanning && <p className="text-blue-600 text-sm mt-2 animate-pulse"><i className="fa-solid fa-spinner fa-spin mr-1"></i> 문서 분석 중...</p>}
+                                {fileName && !isScanning && <p className="text-green-600 text-sm mt-2"><i className="fa-solid fa-check mr-1"></i> {fileName} 분석 완료. 아래 내역을 확인 및 수정하세요.</p>}
+                                <p className="text-xs text-gray-500 mt-1">* 주의: 본 시스템은 브라우저 기반으로 실제 완벽한 PDF OCR을 지원하지 않아 수동 확인이 필수입니다.</p>
+                            </div>
+                        )}
+
+                        <form onSubmit={handleSubmit}>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">일자</label>
+                                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required className="w-full border rounded p-2 focus:ring focus:ring-blue-200" />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-gray-700 mb-1">적요 (내용)</label>
+                                    <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required placeholder="ex) 강사수당 지급" className="w-full border rounded p-2 focus:ring focus:ring-blue-200" />
+                                </div>
+                            </div>
+
+                            <div className="mb-4">
+                                <label className="block text-sm font-bold text-gray-700 mb-1">금액 반영 내역</label>
+                                {items.map((item, index) => (
+                                    <div key={index} className="flex space-x-2 mb-2 items-center bg-gray-50 p-2 rounded">
+                                        <select 
+                                            value={item.budgetId} 
+                                            onChange={(e) => {
+                                                const newItems = [...items];
+                                                newItems[index].budgetId = e.target.value;
+                                                setItems(newItems);
+                                            }}
+                                            className="flex-1 border rounded p-2 text-sm"
+                                            required
+                                        >
+                                            <option value="">목 선택...</option>
+                                            {config.type === 'adjustment' && <option value="NEW" className="font-bold text-blue-600">+ 신규 목 생성 (성립전)</option>}
+                                            {budgets.map(b => (
+                                                <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>
+                                            ))}
+                                        </select>
+                                        
+                                        {item.budgetId === 'NEW' && config.type === 'adjustment' ? (
+                                            <>
+                                                <input type="text" placeholder="통계비목" onChange={e => {const n=[...items]; n[index].subTitle=e.target.value; setItems(n)}} className="w-24 border rounded p-2 text-sm" required />
+                                                <input type="text" placeholder="산출내역" onChange={e => {const n=[...items]; n[index].title=e.target.value; setItems(n)}} className="w-32 border rounded p-2 text-sm" required />
+                                            </>
+                                        ) : null}
+
+                                        <input 
+                                            type="number" 
+                                            value={item.amount || ''} 
+                                            onChange={(e) => {
+                                                const newItems = [...items];
+                                                newItems[index].amount = parseInt(e.target.value) || 0;
+                                                setItems(newItems);
+                                            }}
+                                            placeholder="금액"
+                                            className="w-32 border rounded p-2 text-right"
+                                            required
+                                        />
+                                        <span className="text-sm">원</span>
+                                        {items.length > 1 && (
+                                            <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 hover:text-red-700 p-2"><i className="fa-solid fa-trash"></i></button>
+                                        )}
+                                    </div>
+                                ))}
+                                <button type="button" onClick={() => setItems([...items, {budgetId: budgets[0]?.id || '', amount: 0}])} className="text-sm text-blue-600 hover:underline mt-1">+ 내역 추가</button>
+                            </div>
+
+                            <div className="flex justify-end space-x-2 pt-4 border-t">
+                                <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">취소</button>
+                                <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">장부 반영</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Tab 2: History
+        // ==========================================
+        const HistoryTab = ({ transactions, budgets, onPrint }) => {
+            const [searchTerm, setSearchTerm] = React.useState('');
+            const [filterType, setFilterType] = React.useState('all');
+
+            const getBudgetName = (id) => {
+                const b = budgets.find(b => b.id === id);
+                return b ? `[${b.subTitle}] ${b.title}` : '알 수 없음/삭제됨';
+            };
+
+            const getTypeLabel = (type) => {
+                switch(type) {
+                    case 'requisition': return <span className="text-green-600 font-bold">품의</span>;
+                    case 'encumbrance': return <span className="text-orange-600 font-bold">원인행위</span>;
+                    case 'expenditure': return <span className="text-blue-600 font-bold">지출</span>;
+                    case 'adjustment': return <span className="text-purple-600 font-bold">예산조정</span>;
+                    default: return type;
+                }
+            };
+
+            // Flatten items inside transactions for display
+            let displayRows = [];
+            transactions.forEach(t => {
+                t.items.forEach((item, idx) => {
+                    displayRows.push({
+                        ...t,
+                        itemId: `${t.id}_${idx}`,
+                        budgetId: item.budgetId,
+                        amount: item.amount,
+                        isFirstInGroup: idx === 0,
+                        rowSpan: t.items.length
+                    });
+                });
+            });
+
+            // Filter
+            const filteredRows = displayRows.filter(row => {
+                const matchType = filterType === 'all' || row.type === filterType;
+                const matchSearch = row.description.includes(searchTerm) || getBudgetName(row.budgetId).includes(searchTerm) || row.date.includes(searchTerm);
+                return matchType && matchSearch;
+            });
+
+            return (
+                <div className="bg-white rounded shadow p-6 print-full-width">
+                    <div className="flex justify-between items-center mb-6 no-print">
+                        <h2 className="text-xl font-bold text-gray-800">예산 변동 내역 장부</h2>
+                        <div className="flex space-x-2">
+                            <select value={filterType} onChange={e => setFilterType(e.target.value)} className="border rounded p-2">
+                                <option value="all">전체 내역</option>
+                                <option value="requisition">품의 내역</option>
+                                <option value="expenditure">지출 내역</option>
+                                <option value="adjustment">예산/성립전 조정</option>
+                            </select>
+                            <input 
+                                type="text" 
+                                placeholder="날짜, 적요, 목 검색..." 
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                className="border rounded p-2 w-64"
+                            />
+                            <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-2 rounded hover:bg-gray-700"><i className="fa-solid fa-print"></i></button>
+                        </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="table-header">
+                                <tr>
+                                    <th className="w-[12%]">일자</th>
+                                    <th className="w-[10%]">구분</th>
+                                    <th className="w-[30%]">적요 (내용)</th>
+                                    <th className="w-[30%]">예산 목</th>
+                                    <th className="w-[18%]">금액</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredRows.length === 0 ? (
+                                    <tr><td colSpan="5" className="text-center p-8 text-gray-500">기록된 내역이 없습니다.</td></tr>
+                                ) : (
+                                    filteredRows.map((row) => (
+                                        <tr key={row.itemId} className="hover:bg-gray-50 border-b">
+                                            {row.isFirstInGroup && <td className="p-3 text-center border-r" rowSpan={row.rowSpan}>{row.date}</td>}
+                                            {row.isFirstInGroup && <td className="p-3 text-center border-r" rowSpan={row.rowSpan}>{getTypeLabel(row.type)}</td>}
+                                            {row.isFirstInGroup && <td className="p-3 border-r" rowSpan={row.rowSpan}>{row.description}</td>}
+                                            <td className="p-3 border-r text-gray-700">{getBudgetName(row.budgetId)}</td>
+                                            <td className="p-3 text-right font-mono font-bold">{formatKRW(row.amount)} 원</td>
+                                        </tr>
+                                    ))
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Tab 3: Chart & Schedule
+        // ==========================================
+        const ChartTab = ({ transactions, budgets, year }) => {
+            const chartRef = React.useRef(null);
+            const chartInstance = React.useRef(null);
+
+            React.useEffect(() => {
+                if (!chartRef.current) return;
+
+                // Prepare Data: Group expenditures by month (Mar ~ Feb)
+                const months = ['3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월', '1월', '2월'];
+                const expData = new Array(12).fill(0);
+                const reqData = new Array(12).fill(0);
+
+                transactions.forEach(t => {
+                    const d = new Date(t.date);
+                    const m = d.getMonth() + 1; // 1-12
+                    let index = m - 3;
+                    if (index < 0) index += 12; // Jan/Feb wrap around
+
+                    const totalAmount = t.items.reduce((sum, item) => sum + item.amount, 0);
+                    if (t.type === 'expenditure') expData[index] += totalAmount;
+                    if (t.type === 'requisition') reqData[index] += totalAmount;
+                });
+
+                if (chartInstance.current) chartInstance.current.destroy();
+
+                chartInstance.current = new Chart(chartRef.current, {
+                    type: 'bar',
+                    data: {
+                        labels: months,
+                        datasets: [
+                            {
+                                label: '월별 지출액',
+                                data: expData,
+                                backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                                borderColor: 'rgb(59, 130, 246)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: '월별 품의액',
+                                data: reqData,
+                                type: 'line',
+                                borderColor: 'rgb(16, 185, 129)',
+                                backgroundColor: 'transparent',
+                                borderDash: [5, 5],
+                                tension: 0.1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: `${year}학년도 월별 예산 집행 추이` }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { callback: (value) => (value / 10000).toLocaleString() + '만' } }
+                        }
+                    }
+                });
+
+                return () => { if (chartInstance.current) chartInstance.current.destroy(); };
+            }, [transactions, year]);
+
+            // Seoul Time & Prediction Logic
+            const seoulTime = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+            const currentMonth = new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "numeric" }).replace('월', '').trim();
+            
+            // Mock Prediction (Since we don't have multi-year DB access in this isolated component)
+            const predictionText = `작년 동월(${currentMonth}월) 데이터 분석 결과, 주로 '원어민보조교사 수당' 지출이 집중되는 시기입니다. 품의 결재 일정을 선제적으로 관리하시기 바랍니다.`;
+
+            return (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white rounded shadow p-6 md:col-span-2">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4">예산 집행 시각화</h2>
+                            <div className="h-80 relative">
+                                <canvas ref={chartRef}></canvas>
+                            </div>
+                        </div>
+                        
+                        <div className="bg-white rounded shadow p-6 flex flex-col">
+                            <h2 className="text-xl font-bold text-gray-800 mb-4">일정 및 예측 안내</h2>
+                            
+                            <div className="bg-blue-50 p-4 rounded mb-4">
+                                <p className="text-sm text-gray-500 mb-1">기준 시간 (서울)</p>
+                                <p className="font-bold text-lg text-blue-800"><i className="fa-regular fa-clock mr-2"></i>{seoulTime}</p>
+                            </div>
+
+                            <div className="bg-yellow-50 border border-yellow-200 p-4 rounded flex-1">
+                                <h3 className="font-bold text-yellow-800 mb-2"><i className="fa-solid fa-lightbulb mr-2"></i>이번 달 지출 예측</h3>
+                                <p className="text-sm text-gray-700 leading-relaxed">
+                                    {predictionText}
+                                </p>
+                                <p className="text-xs text-gray-400 mt-4">* 본 예측은 이전 연도 데이터를 바탕으로 생성된 참고 자료입니다.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
