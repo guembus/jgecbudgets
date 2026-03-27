@@ -104,14 +104,38 @@
         ];
 
         const formatKRW = (num) => {
-            if (num === null || num === undefined) return '0';
-            return num.toLocaleString('ko-KR');
+            if (num === null || num === undefined || isNaN(num)) return '0';
+            return parseInt(num, 10).toLocaleString('ko-KR');
         };
 
         const getFiscalYear = (date = new Date()) => {
             const year = date.getFullYear();
             const month = date.getMonth() + 1;
             return month < 3 ? year - 1 : year;
+        };
+
+        // ==========================================
+        // UI Component: 공용 커스텀 모달 (Iframe Alert/Confirm 대체용)
+        // ==========================================
+        const DialogModal = ({ isOpen, message, isAlert, onConfirm, onCancel }) => {
+            if (!isOpen) return null;
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[100]">
+                    <div className="bg-white rounded-xl p-6 w-[400px] shadow-2xl text-center">
+                        <div className="mb-6">
+                            {isAlert ? 
+                                <i className="fa-solid fa-circle-exclamation text-red-500 text-4xl mb-4"></i> : 
+                                <i className="fa-solid fa-circle-question text-blue-500 text-4xl mb-4"></i>
+                            }
+                            <p className="text-lg font-bold text-gray-800 whitespace-pre-wrap">{message}</p>
+                        </div>
+                        <div className="flex justify-center space-x-3">
+                            {!isAlert && <button onClick={onCancel} className="px-6 py-2 bg-gray-200 text-gray-800 font-bold rounded hover:bg-gray-300 transition-colors">취소</button>}
+                            <button onClick={onConfirm} className={`px-6 py-2 text-white font-bold rounded transition-colors ${isAlert ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700'}`}>확인</button>
+                        </div>
+                    </div>
+                </div>
+            );
         };
 
         const App = () => {
@@ -122,7 +146,12 @@
             const [transactions, setTransactions] = React.useState([]);
             const [loading, setLoading] = React.useState(true);
             const [dbStatus, setDbStatus] = React.useState('connecting');
-            const [dbErrorMessage, setDbErrorMessage] = React.useState('');
+            
+            const [dialog, setDialog] = React.useState({ isOpen: false, message: '', isAlert: false, onConfirm: null });
+
+            const showAlert = (message) => setDialog({ isOpen: true, message, isAlert: true, onConfirm: () => setDialog(prev => ({...prev, isOpen: false})) });
+            const showConfirm = (message, onConfirmCallback) => setDialog({ isOpen: true, message, isAlert: false, onConfirm: () => { onConfirmCallback(); setDialog(prev => ({...prev, isOpen: false})); } });
+            const closeDialog = () => setDialog(prev => ({ ...prev, isOpen: false }));
 
             React.useEffect(() => {
                 if (!auth) {
@@ -141,7 +170,6 @@
                         }
                     } catch (error) {
                         setDbStatus('error');
-                        setDbErrorMessage('인증 오류: 파이어베이스 콘솔 Authentication > Sign-in method에서 "익명(Anonymous)"을 사용 설정해주세요.');
                         setLoading(false);
                         initializeLocalData(selectedYear);
                     }
@@ -157,7 +185,6 @@
 
             React.useEffect(() => {
                 if (!auth || !user) return;
-
                 const appId = getAppId();
                 setLoading(true);
                 setDbStatus('connected');
@@ -170,29 +197,23 @@
                         });
                     } else {
                         const bData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        setBudgets(bData.sort((a, b) => parseInt(a.id) - parseInt(b.id)));
+                        setBudgets(bData.sort((a, b) => {
+                            const intA = parseInt(a.id);
+                            const intB = parseInt(b.id);
+                            if(!isNaN(intA) && !isNaN(intB)) return intA - intB;
+                            return a.id.localeCompare(b.id);
+                        }));
                     }
-                }, (error) => {
-                    setDbStatus('error');
-                    setDbErrorMessage('데이터베이스 읽기 권한 오류');
                 });
 
                 const transRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`);
                 const unsubTrans = transRef.onSnapshot((snapshot) => {
                     const tData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // 정렬은 클라이언트(메모리)에서 처리 (Rule 2 준수)
                     setTransactions(tData);
-                    setLoading(false);
-                }, (error) => {
-                    setDbStatus('error');
-                    setDbErrorMessage('데이터베이스 읽기 권한 오류');
                     setLoading(false);
                 });
 
-                return () => {
-                    unsubBudgets();
-                    unsubTrans();
-                };
+                return () => { unsubBudgets(); unsubTrans(); };
             }, [user, selectedYear]);
 
             const initializeLocalData = (year) => {
@@ -206,36 +227,27 @@
                 setTransactions(JSON.parse(localStorage.getItem(tKey)) || []);
             };
 
-            const handleTransaction = async (type, date, items, description, extraBudgets = [], attachedFiles = []) => {
-                const newTransId = Date.now().toString();
-                const transactionRecord = {
-                    id: newTransId, date, type, items, description, attachedFiles, timestamp: new Date().toISOString()
-                };
+            const saveLocalData = (newBudgets, newTransactions) => {
+                localStorage.setItem(`local_budgets_${selectedYear}`, JSON.stringify(newBudgets));
+                localStorage.setItem(`local_trans_${selectedYear}`, JSON.stringify(newTransactions));
+            };
 
+            const handleTransaction = async (type, date, items, description, attachedFiles = []) => {
+                const newTransId = Date.now().toString();
+                const transactionRecord = { id: newTransId, date, type, items, description, attachedFiles, timestamp: new Date().toISOString() };
                 const budgetUpdates = {};
+                
                 items.forEach(item => {
-                    if (!budgetUpdates[item.budgetId]) {
-                        budgetUpdates[item.budgetId] = { req: 0, enc: 0, exp: 0, amtChange: 0 };
-                    }
+                    if (!budgetUpdates[item.budgetId]) budgetUpdates[item.budgetId] = { req: 0, exp: 0 };
                     if (type === 'requisition') budgetUpdates[item.budgetId].req += item.amount;
-                    if (type === 'encumbrance') budgetUpdates[item.budgetId].enc += item.amount;
                     if (type === 'expenditure') budgetUpdates[item.budgetId].exp += item.amount;
-                    if (type === 'adjustment') budgetUpdates[item.budgetId].amtChange += item.amount;
                 });
 
                 if (auth && user) {
                     const appId = getAppId();
                     const batch = db.batch();
-                    
                     const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
                     batch.set(tRef, transactionRecord);
-
-                    if (extraBudgets && extraBudgets.length > 0) {
-                        extraBudgets.forEach(eb => {
-                            const ebRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(eb.id);
-                            batch.set(ebRef, eb);
-                        });
-                    }
 
                     budgets.forEach(b => {
                         if (budgetUpdates[b.id]) {
@@ -243,106 +255,206 @@
                             const updates = budgetUpdates[b.id];
                             batch.update(bRef, {
                                 requisitioned: (b.requisitioned || 0) + updates.req,
-                                encumbered: (b.encumbered || 0) + updates.enc,
-                                expended: (b.expended || 0) + updates.exp,
-                                amount: (b.amount || 0) + updates.amtChange
+                                expended: (b.expended || 0) + updates.exp
                             });
                         }
                     });
-                    
-                    items.forEach(item => {
-                        if (type === 'adjustment' && item.isNew) {
-                             const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(item.budgetId);
-                             batch.set(bRef, {
-                                 id: item.budgetId, parent: item.parent, title: item.title, subTitle: item.subTitle, type: 'item',
-                                 amount: item.amount, requisitioned: 0, encumbered: 0, expended: 0
-                             });
-                        }
-                    });
-
                     await batch.commit();
                 } else {
-                    alert("로컬 모드에서는 거래 내역 저장이 제한될 수 있습니다.");
+                    let nextBudgets = budgets.map(b => {
+                        if (budgetUpdates[b.id]) {
+                            return { ...b, requisitioned: (b.requisitioned || 0) + budgetUpdates[b.id].req, expended: (b.expended || 0) + budgetUpdates[b.id].exp };
+                        }
+                        return b;
+                    });
+                    const nextTrans = [transactionRecord, ...transactions];
+                    setBudgets(nextBudgets); setTransactions(nextTrans);
+                    saveLocalData(nextBudgets, nextTrans);
+                }
+            };
+
+            const handleBatchTransaction = async (mode, date, description, attachedFiles, draftBudgets) => {
+                const newTransId = Date.now().toString();
+                const transactionRecord = { id: newTransId, date, type: mode, description, attachedFiles, timestamp: new Date().toISOString() };
+                
+                const oldMap = new Map(budgets.map(b => [b.id, b]));
+                const newMap = new Map(draftBudgets.map(b => [b.id, b]));
+
+                if (mode === 'structure') {
+                    const added = draftBudgets.filter(b => !oldMap.has(b.id));
+                    const deleted = budgets.filter(b => !newMap.has(b.id));
+                    const renamed = draftBudgets
+                        .filter(b => oldMap.has(b.id) && (oldMap.get(b.id).title !== b.title || oldMap.get(b.id).subTitle !== b.subTitle))
+                        .map(b => ({
+                            id: b.id,
+                            newTitle: b.title, newSubTitle: b.subTitle || "",
+                            oldTitle: oldMap.get(b.id).title, oldSubTitle: oldMap.get(b.id).subTitle || ""
+                        }));
+                    transactionRecord.structureChanges = { added, deleted, renamed };
+                } 
+                else if (mode === 'adjustment') {
+                    const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                    transactionRecord.items = adjustedItems.map(b => ({
+                        budgetId: b.id,
+                        amount: Number(b.amount || 0) - Number(oldMap.get(b.id).amount || 0),
+                        newTotal: Number(b.amount || 0)
+                    }));
+                }
+
+                if (auth && user) {
+                    const appId = getAppId();
+                    const batch = db.batch();
+                    const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
+
+                    if (mode === 'structure') {
+                        const { added, deleted, renamed } = transactionRecord.structureChanges;
+                        added.forEach(b => {
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            batch.set(r, { ...b, subTitle: b.subTitle || "", requisitioned: 0, expended: 0, encumbered: 0 });
+                        });
+                        deleted.forEach(b => {
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            batch.delete(r);
+                        });
+                        renamed.forEach(b => {
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            batch.update(r, { title: b.newTitle, subTitle: b.newSubTitle });
+                        });
+                    } else if (mode === 'adjustment') {
+                        const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                        adjustedItems.forEach(b => {
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            batch.update(r, { amount: Number(b.amount || 0) });
+                        });
+                    }
+
+                    batch.set(tRef, transactionRecord);
+                    await batch.commit();
+                } else {
+                    let nextBudgets = [...budgets];
+                    if (mode === 'structure') {
+                        const { added, deleted, renamed } = transactionRecord.structureChanges;
+                        const deletedIds = deleted.map(d => d.id);
+                        nextBudgets = nextBudgets.filter(b => !deletedIds.includes(b.id));
+                        nextBudgets = [...nextBudgets, ...added.map(b => ({ ...b, subTitle: b.subTitle || "", requisitioned: 0, expended: 0, encumbered: 0 }))];
+                        renamed.forEach(r => {
+                            const idx = nextBudgets.findIndex(b => b.id === r.id);
+                            if (idx !== -1) { nextBudgets[idx].title = r.newTitle; nextBudgets[idx].subTitle = r.newSubTitle; }
+                        });
+                    } else if (mode === 'adjustment') {
+                        const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                        adjustedItems.forEach(adj => {
+                            const idx = nextBudgets.findIndex(b => b.id === adj.id);
+                            if (idx !== -1) nextBudgets[idx].amount = Number(adj.amount || 0);
+                        });
+                    }
+                    const nextTrans = [transactionRecord, ...transactions];
+                    setBudgets(nextBudgets); setTransactions(nextTrans); saveLocalData(nextBudgets, nextTrans);
                 }
             };
 
             const handleDeleteTransaction = async (transId) => {
-                if (!window.confirm('이 거래 내역을 삭제하고 예산 금액을 되돌리시겠습니까?')) return;
+                showConfirm('이 거래 내역을 삭제하고 예산 금액과 구조를 반영취소하시겠습니까?', async () => {
+                    const transToDelete = transactions.find(t => t.id === transId);
+                    if (!transToDelete) return;
 
-                const transToDelete = transactions.find(t => t.id === transId);
-                if (!transToDelete) return;
+                    if (auth && user) {
+                        const appId = getAppId();
+                        const batch = db.batch();
+                        const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(transId);
+                        batch.delete(tRef);
 
-                const budgetUpdates = {};
-                transToDelete.items.forEach(item => {
-                    if (!budgetUpdates[item.budgetId]) {
-                        budgetUpdates[item.budgetId] = { req: 0, enc: 0, exp: 0, amtChange: 0 };
-                    }
-                    if (transToDelete.type === 'requisition') budgetUpdates[item.budgetId].req -= item.amount;
-                    if (transToDelete.type === 'encumbrance') budgetUpdates[item.budgetId].enc -= item.amount;
-                    if (transToDelete.type === 'expenditure') budgetUpdates[item.budgetId].exp -= item.amount;
-                    if (transToDelete.type === 'adjustment') budgetUpdates[item.budgetId].amtChange -= item.amount;
-                });
+                        if (transToDelete.type === 'requisition' || transToDelete.type === 'expenditure' || transToDelete.type === 'adjustment') {
+                            const budgetUpdates = {};
+                            (transToDelete.items || []).forEach(item => {
+                                if (!budgetUpdates[item.budgetId]) budgetUpdates[item.budgetId] = { req: 0, exp: 0, amtChange: 0 };
+                                if (transToDelete.type === 'requisition') budgetUpdates[item.budgetId].req -= item.amount;
+                                if (transToDelete.type === 'expenditure') budgetUpdates[item.budgetId].exp -= item.amount;
+                                if (transToDelete.type === 'adjustment') budgetUpdates[item.budgetId].amtChange -= item.amount;
+                            });
 
-                if (auth && user) {
-                    const appId = getAppId();
-                    const batch = db.batch();
-                    
-                    const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(transId);
-                    batch.delete(tRef);
-
-                    budgets.forEach(b => {
-                        if (budgetUpdates[b.id]) {
-                            const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
-                            const updates = budgetUpdates[b.id];
-                            batch.update(bRef, {
-                                requisitioned: (b.requisitioned || 0) + updates.req,
-                                encumbered: (b.encumbered || 0) + updates.enc,
-                                expended: (b.expended || 0) + updates.exp,
-                                amount: (b.amount || 0) + updates.amtChange
+                            budgets.forEach(b => {
+                                if (budgetUpdates[b.id]) {
+                                    const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                    const updates = budgetUpdates[b.id];
+                                    batch.update(bRef, {
+                                        requisitioned: (b.requisitioned || 0) + updates.req,
+                                        expended: (b.expended || 0) + updates.exp,
+                                        amount: (b.amount || 0) + updates.amtChange
+                                    });
+                                }
                             });
                         }
-                    });
 
-                    // Storage 파일 삭제 시도 (에러나도 무시하여 트랜잭션 롤백 방지)
-                    if (transToDelete.attachedFiles && transToDelete.attachedFiles.length > 0 && storage) {
-                        transToDelete.attachedFiles.forEach(file => {
-                            if (file.path) {
-                                storage.ref().child(file.path).delete().catch(e => console.error("Storage delete error:", e));
-                            }
-                        });
+                        if (transToDelete.type === 'structure' && transToDelete.structureChanges) {
+                            const { added, deleted, renamed } = transToDelete.structureChanges;
+                            added.forEach(b => {
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                batch.delete(r);
+                            });
+                            deleted.forEach(b => {
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                batch.set(r, b);
+                            });
+                            renamed.forEach(b => {
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                batch.update(r, { title: b.oldTitle, subTitle: b.oldSubTitle });
+                            });
+                        }
+
+                        if (transToDelete.attachedFiles && transToDelete.attachedFiles.length > 0 && storage) {
+                            transToDelete.attachedFiles.forEach(file => {
+                                if (file.path) storage.ref().child(file.path).delete().catch(e => console.error(e));
+                            });
+                        }
+                        await batch.commit();
+                    } else {
+                        // 로컬 폴백 (되돌리기)
+                        let nextBudgets = [...budgets];
+                        if (transToDelete.type === 'requisition' || transToDelete.type === 'expenditure' || transToDelete.type === 'adjustment') {
+                            const budgetUpdates = {};
+                            (transToDelete.items || []).forEach(item => {
+                                if (!budgetUpdates[item.budgetId]) budgetUpdates[item.budgetId] = { req: 0, exp: 0, amtChange: 0 };
+                                if (transToDelete.type === 'requisition') budgetUpdates[item.budgetId].req -= item.amount;
+                                if (transToDelete.type === 'expenditure') budgetUpdates[item.budgetId].exp -= item.amount;
+                                if (transToDelete.type === 'adjustment') budgetUpdates[item.budgetId].amtChange -= item.amount;
+                            });
+                            nextBudgets = nextBudgets.map(b => {
+                                if (budgetUpdates[b.id]) {
+                                    const u = budgetUpdates[b.id];
+                                    return { ...b, requisitioned: (b.requisitioned || 0) + u.req, expended: (b.expended || 0) + u.exp, amount: (b.amount || 0) + u.amtChange };
+                                }
+                                return b;
+                            });
+                        }
+                        if (transToDelete.type === 'structure' && transToDelete.structureChanges) {
+                            const { added, deleted, renamed } = transToDelete.structureChanges;
+                            const addedIds = added.map(a => a.id);
+                            nextBudgets = nextBudgets.filter(b => !addedIds.includes(b.id));
+                            nextBudgets = [...nextBudgets, ...deleted];
+                            renamed.forEach(r => {
+                                const idx = nextBudgets.findIndex(b => b.id === r.id);
+                                if (idx !== -1) { nextBudgets[idx].title = r.oldTitle; nextBudgets[idx].subTitle = r.oldSubTitle; }
+                            });
+                        }
+                        const nextTrans = transactions.filter(t => t.id !== transId);
+                        setBudgets(nextBudgets); setTransactions(nextTrans); saveLocalData(nextBudgets, nextTrans);
                     }
-
-                    await batch.commit();
-                }
+                });
             };
 
             return (
                 <div className="min-h-screen flex flex-col">
+                    <DialogModal {...dialog} onCancel={closeDialog} />
+                    
                     <header className="bg-blue-800 text-white p-4 shadow-md no-print flex justify-between items-center">
                         <div className="flex items-center space-x-4">
                             <h1 className="text-2xl font-bold"><i className="fa-solid fa-school mr-2"></i>장성글로컬교육센터 예산 관리</h1>
                             <div className="bg-blue-700 rounded px-3 py-1 flex items-center space-x-3 shadow-inner">
                                 <span className="text-sm text-blue-200 font-bold">회계연도:</span>
-                                <button onClick={() => setSelectedYear(y => y - 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="이전 연도">
-                                    <i className="fa-solid fa-chevron-left"></i>
-                                </button>
+                                <button onClick={() => setSelectedYear(y => y - 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="이전 연도"><i className="fa-solid fa-chevron-left"></i></button>
                                 <span className="font-bold text-lg w-40 text-center tracking-wide">{selectedYear}년 <span className="text-xs font-normal text-blue-200">({selectedYear}.3~{selectedYear+1}.2)</span></span>
-                                <button onClick={() => setSelectedYear(y => y + 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="다음 연도">
-                                    <i className="fa-solid fa-chevron-right"></i>
-                                </button>
-                            </div>
-
-                            <div className="flex items-center text-xs ml-4 border border-blue-600 rounded px-2 py-1 bg-blue-900 cursor-help group relative">
-                                {dbStatus === 'connecting' && <span className="text-yellow-300"><i className="fa-solid fa-spinner fa-spin mr-1"></i>연결 확인 중...</span>}
-                                {dbStatus === 'connected' && <span className="text-green-300 font-bold"><i className="fa-solid fa-cloud mr-1"></i>클라우드 정상 작동</span>}
-                                {dbStatus === 'local' && <span className="text-gray-300"><i className="fa-solid fa-hard-drive mr-1"></i>로컬 모드 (저장 불가)</span>}
-                                {dbStatus === 'error' && <span className="text-red-300 font-bold"><i className="fa-solid fa-triangle-exclamation mr-1"></i>클라우드 접근 차단됨</span>}
-                                
-                                {dbStatus === 'error' && (
-                                    <div className="absolute top-full left-0 mt-2 w-80 p-3 bg-white text-red-700 text-sm rounded shadow-2xl hidden group-hover:block z-50 font-bold border-2 border-red-500 whitespace-normal">
-                                        <i className="fa-solid fa-circle-xmark mr-1"></i>{dbErrorMessage}
-                                    </div>
-                                )}
+                                <button onClick={() => setSelectedYear(y => y + 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="다음 연도"><i className="fa-solid fa-chevron-right"></i></button>
                             </div>
                         </div>
                         <div className="space-x-2">
@@ -351,17 +463,14 @@
                             <button onClick={() => setActiveTab('chart')} className={`px-4 py-2 rounded transition-colors ${activeTab === 'chart' ? 'bg-white text-blue-800 font-bold' : 'hover:bg-blue-700'}`}>차트/일정</button>
                         </div>
                     </header>
-
-                    <main className="flex-1 p-6 print-full-width">
+                    <main className="flex-1 p-6 print-full-width relative">
                         {loading ? (
-                            <div className="flex justify-center items-center h-64">
-                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800"></div>
-                            </div>
+                            <div className="flex justify-center items-center h-64"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-800"></div></div>
                         ) : (
                             <>
-                                {activeTab === 'overview' && <OverviewTab budgets={budgets} onTransaction={handleTransaction} onPrint={() => window.print()} />}
+                                {activeTab === 'overview' && <OverviewTab budgets={budgets} onTransaction={handleTransaction} onBatchTransaction={handleBatchTransaction} onPrint={() => window.print()} showAlert={showAlert} showConfirm={showConfirm} />}
                                 {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={() => window.print()} onDelete={handleDeleteTransaction} />}
-                                {activeTab === 'chart' && <ChartTab transactions={transactions} budgets={budgets} year={selectedYear} />}
+                                {activeTab === 'chart' && <ChartTab transactions={transactions} year={selectedYear} />}
                             </>
                         )}
                     </main>
@@ -372,32 +481,38 @@
         // ==========================================
         // Tab 1: Overview
         // ==========================================
-        const OverviewTab = ({ budgets, onTransaction, onPrint }) => {
-            const [modalConfig, setModalConfig] = React.useState(null);
+        const OverviewTab = ({ budgets, onTransaction, onBatchTransaction, onPrint, showAlert, showConfirm }) => {
+            const [mode, setMode] = React.useState('view');
+            const [draftBudgets, setDraftBudgets] = React.useState([]);
+            
+            const [txModalType, setTxModalType] = React.useState(null); 
+            const [editNodeModal, setEditNodeModal] = React.useState(null); 
+            const [adjustBudgetModal, setAdjustBudgetModal] = React.useState(null);
+            const [commitModalOpen, setCommitModalOpen] = React.useState(false);
 
-            const processData = () => {
-                let processed = JSON.parse(JSON.stringify(budgets));
-                
+            const enterMode = (newMode) => {
+                setDraftBudgets(JSON.parse(JSON.stringify(budgets)));
+                setMode(newMode);
+            };
+
+            const cancelMode = () => {
+                showConfirm("현재까지 수정한 작업 내용이 모두 사라집니다. 취소하시겠습니까?", () => setMode('view'));
+            };
+
+            const processData = (dataSource) => {
+                let processed = JSON.parse(JSON.stringify(dataSource));
                 const rollUp = (parentId) => {
                     let children = processed.filter(b => b.parent === parentId);
-                    let sum = { amount: 0, req: 0, enc: 0, exp: 0 };
-                    
+                    let sum = { amount: 0, req: 0, exp: 0 };
                     children.forEach(c => {
                         if (c.type === 'item') {
-                            sum.amount += c.amount || 0;
-                            sum.req += c.requisitioned || 0;
-                            sum.enc += c.encumbered || 0;
-                            sum.exp += c.expended || 0;
+                            sum.amount += parseInt(c.amount) || 0;
+                            sum.req += parseInt(c.requisitioned) || 0;
+                            sum.exp += parseInt(c.expended) || 0;
                         } else {
                             const cSum = rollUp(c.id);
-                            c.amount = cSum.amount;
-                            c.requisitioned = cSum.req;
-                            c.encumbered = cSum.enc;
-                            c.expended = cSum.exp;
-                            sum.amount += cSum.amount;
-                            sum.req += cSum.req;
-                            sum.enc += cSum.enc;
-                            sum.exp += cSum.exp;
+                            c.amount = cSum.amount; c.requisitioned = cSum.req; c.expended = cSum.exp;
+                            sum.amount += cSum.amount; sum.req += cSum.req; sum.exp += cSum.exp;
                         }
                     });
                     return sum;
@@ -406,10 +521,7 @@
                 const topLevel = processed.filter(b => b.parent === null);
                 topLevel.forEach(t => {
                     const tSum = rollUp(t.id);
-                    t.amount = tSum.amount;
-                    t.requisitioned = tSum.req;
-                    t.encumbered = tSum.enc;
-                    t.expended = tSum.exp;
+                    t.amount = tSum.amount; t.requisitioned = tSum.req; t.expended = tSum.exp;
                 });
 
                 const flatten = (parentId, level = 0) => {
@@ -429,47 +541,75 @@
                 });
 
                 const total = topLevel.reduce((acc, curr) => ({
-                    amount: acc.amount + (curr.amount || 0), req: acc.req + (curr.requisitioned || 0),
-                    enc: acc.enc + (curr.encumbered || 0), exp: acc.exp + (curr.expended || 0)
-                }), {amount:0, req:0, enc:0, exp:0});
+                    amount: acc.amount + (curr.amount || 0), req: acc.req + (curr.requisitioned || 0), exp: acc.exp + (curr.expended || 0)
+                }), {amount:0, req:0, exp:0});
 
                 return { displayList, total };
             };
 
-            const { displayList, total } = processData();
+            const { displayList, total } = processData(mode === 'view' ? budgets : draftBudgets);
+
+            const handleDeleteNode = (id) => {
+                const target = draftBudgets.find(b => b.id === id);
+                let toDelete = [id];
+                let changed = true;
+                while(changed) {
+                    changed = false;
+                    draftBudgets.forEach(b => {
+                        if (toDelete.includes(b.parent) && !toDelete.includes(b.id)) { toDelete.push(b.id); changed = true; }
+                    });
+                }
+                const sumAmount = draftBudgets.filter(b => toDelete.includes(b.id) && b.type === 'item').reduce((acc, curr) => acc + (curr.amount || 0), 0);
+                
+                showConfirm(`[${target.title}] 및 하위 항목을 삭제합니다. 연결된 예산 ${formatKRW(sumAmount)}원이 함께 소멸됩니다.\n\n정말 계속하시겠습니까?`, () => {
+                    setDraftBudgets(prev => prev.filter(b => !toDelete.includes(b.id)));
+                });
+            };
 
             return (
                 <div className="bg-white rounded shadow p-6 print-full-width">
                     <div className="flex justify-between items-center mb-4 no-print">
-                        <h2 className="text-xl font-bold text-gray-800">예산 현황 총괄표</h2>
-                        <div className="space-x-2">
-                            <button onClick={() => setModalConfig({type: 'requisition', title: '수기 지출품의 등록 및 근거 첨부', date: new Date().toISOString().split('T')[0]})} className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 text-sm"><i className="fa-solid fa-pen mr-1"></i> 지출품의 수기반영</button>
-                            <button onClick={() => setModalConfig({type: 'expenditure', title: '수기 지출결의 등록 및 근거 첨부', date: new Date().toISOString().split('T')[0]})} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"><i className="fa-solid fa-pen mr-1"></i> 지출결의 수기반영</button>
-                            <button onClick={() => setModalConfig({type: 'adjustment', title: '성립전예산/예산조정 등록', date: new Date().toISOString().split('T')[0]})} className="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm"><i className="fa-solid fa-pen-to-square mr-1"></i> 성립전/예산조정</button>
-                            <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 text-sm"><i className="fa-solid fa-print mr-1"></i> 출력/PDF</button>
-                        </div>
+                        <h2 className="text-xl font-bold text-gray-800 flex items-center">
+                            예산 현황 총괄표
+                            {mode === 'structure' && <span className="ml-3 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm animate-pulse border border-purple-300"><i className="fa-solid fa-wrench mr-1"></i>목 편성 모드 진행 중</span>}
+                            {mode === 'budget' && <span className="ml-3 px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm animate-pulse border border-yellow-300"><i className="fa-solid fa-calculator mr-1"></i>예산 조정 모드 진행 중</span>}
+                        </h2>
+                        
+                        {mode === 'view' ? (
+                            <div className="space-x-2">
+                                <button onClick={() => setTxModalType('requisition')} className="bg-green-600 text-white px-3 py-1.5 rounded hover:bg-green-700 text-sm"><i className="fa-solid fa-pen mr-1"></i> 지출품의 반영</button>
+                                <button onClick={() => setTxModalType('expenditure')} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"><i className="fa-solid fa-pen mr-1"></i> 원인행위/지출결의 반영</button>
+                                <div className="inline-block border-l-2 border-gray-300 h-6 mx-2 align-middle"></div>
+                                <button onClick={() => enterMode('structure')} className="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm"><i className="fa-solid fa-layer-group mr-1"></i> 목 편성 모드</button>
+                                <button onClick={() => enterMode('budget')} className="bg-yellow-600 text-white px-3 py-1.5 rounded hover:bg-yellow-700 text-sm"><i className="fa-solid fa-scale-unbalanced mr-1"></i> 예산 조정 모드</button>
+                                <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 text-sm ml-2"><i className="fa-solid fa-print"></i></button>
+                            </div>
+                        ) : (
+                            <div className="space-x-2">
+                                <button onClick={() => setCommitModalOpen(true)} className="bg-red-600 text-white px-5 py-2 rounded shadow hover:bg-red-700 font-bold"><i className="fa-solid fa-check mr-1"></i> 변경사항 일괄 저장</button>
+                                <button onClick={cancelMode} className="bg-gray-400 text-white px-4 py-2 rounded hover:bg-gray-500 font-bold">작업 취소</button>
+                            </div>
+                        )}
                     </div>
 
                     <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead className="table-header">
                                 <tr>
-                                    <th className="w-1/4">세부사업/세부항목/원가통계비목</th>
-                                    <th className="w-1/4">산출내역</th>
-                                    <th className="w-[10%]">예산액</th>
-                                    <th className="w-[10%]">지출품의금액</th>
-                                    <th className="w-[10%]">원인행위금액</th>
-                                    <th className="w-[10%]">지출(지급)액</th>
+                                    <th className="w-[30%]">세부사업 / 세부항목 / 원가통계비목</th>
+                                    <th className="w-[20%]">산출내역</th>
+                                    <th className="w-[12%]">예산액</th>
+                                    <th className="w-[12%]">지출품의금액</th>
+                                    <th className="w-[12%]">원인행위(지출/지급)액</th>
                                     <th className="w-[10%]">예산잔액</th>
-                                    <th className="w-[5%]">집행률</th>
+                                    <th className="w-[4%]">집행률</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <tr className="bg-gray-200 font-bold">
+                                <tr className="bg-gray-200 font-bold border-b-2 border-gray-400">
                                     <td className="table-cell-text" colSpan="2">총 합계</td>
                                     <td className="table-cell">{formatKRW(total.amount)}</td>
                                     <td className="table-cell text-green-700">{formatKRW(total.req)}</td>
-                                    <td className="table-cell text-orange-600">{formatKRW(total.enc)}</td>
                                     <td className="table-cell text-blue-700">{formatKRW(total.exp)}</td>
                                     <td className="table-cell text-red-600">{formatKRW(total.amount - total.exp)}</td>
                                     <td className="table-cell">{total.amount ? ((total.exp / total.amount) * 100).toFixed(1) : 0}%</td>
@@ -477,37 +617,98 @@
                                 {displayList.map((row) => {
                                     const balance = (row.amount || 0) - (row.expended || 0);
                                     const rate = row.amount ? ((row.expended || 0) / row.amount * 100).toFixed(1) : 0;
-                                    let rowClass = "table-cell-text ";
-                                    if (row.type === 'category') rowClass += "row-group";
+                                    
+                                    let rowClass = "table-cell-text relative group ";
+                                    if (row.type === 'category') rowClass += "row-group text-base";
                                     else if (row.type === 'sub') rowClass += "row-subgroup";
                                     else rowClass += "row-item";
 
+                                    let amtClass = "table-cell font-bold ";
+                                    if (mode === 'budget') {
+                                        const original = budgets.find(b => b.id === row.id);
+                                        if (original && Number(original.amount) !== Number(row.amount)) amtClass += "text-blue-600 bg-blue-50";
+                                    }
+
                                     return (
-                                        <tr key={row.id} className="hover:bg-blue-50 transition-colors">
-                                            <td className={rowClass}>{row.type === 'item' ? row.subTitle : row.title}</td>
-                                            <td className="table-cell-text text-gray-600">{row.type === 'item' ? row.title : ''}</td>
-                                            <td className="table-cell">{formatKRW(row.amount)}</td>
-                                            <td className="table-cell">{formatKRW(row.requisitioned)}</td>
-                                            <td className="table-cell">{formatKRW(row.encumbered)}</td>
-                                            <td className="table-cell">{formatKRW(row.expended)}</td>
-                                            <td className="table-cell">{formatKRW(balance)}</td>
-                                            <td className="table-cell text-center">{rate}%</td>
+                                        <tr key={row.id} className="hover:bg-gray-100 transition-colors border-b">
+                                            <td className={rowClass}>
+                                                <div className="flex justify-between items-center">
+                                                    <span>{row.type === 'item' ? row.subTitle : row.title}</span>
+                                                    
+                                                    {mode === 'structure' && (
+                                                        <div className="hidden group-hover:flex space-x-1 absolute right-2 bg-white px-1 shadow rounded">
+                                                            {row.type !== 'item' && (
+                                                                <button onClick={() => setEditNodeModal({ action: row.type === 'category' ? 'add_sub' : 'add_item', targetId: row.id })} className="text-green-600 hover:bg-green-100 px-1.5 py-0.5 rounded" title="하위 항목 추가"><i className="fa-solid fa-plus"></i></button>
+                                                            )}
+                                                            <button onClick={() => setEditNodeModal({ action: 'rename', targetId: row.id })} className="text-blue-600 hover:bg-blue-100 px-1.5 py-0.5 rounded" title="이름 변경"><i className="fa-solid fa-pen"></i></button>
+                                                            <button onClick={() => handleDeleteNode(row.id)} className="text-red-600 hover:bg-red-100 px-1.5 py-0.5 rounded" title="목 삭제"><i className="fa-solid fa-trash"></i></button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="table-cell-text text-gray-700">{row.type === 'item' ? row.title : ''}</td>
+                                            
+                                            <td className={amtClass}>
+                                                <div className="flex justify-between items-center">
+                                                    <span>{formatKRW(row.amount)}</span>
+                                                    {mode === 'budget' && row.type === 'item' && (
+                                                        <button onClick={() => setAdjustBudgetModal({ id: row.id, current: row.amount })} className="ml-2 text-yellow-600 hover:bg-yellow-100 px-1.5 py-0.5 rounded border border-yellow-400 shadow-sm" title="예산액 조정">
+                                                            <i className="fa-solid fa-plus-minus"></i>
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            
+                                            <td className="table-cell text-gray-500">{formatKRW(row.requisitioned)}</td>
+                                            <td className="table-cell text-gray-500">{formatKRW(row.expended)}</td>
+                                            <td className="table-cell font-bold text-red-600">{formatKRW(balance)}</td>
+                                            <td className="table-cell text-center text-gray-500">{rate}%</td>
                                         </tr>
                                     );
                                 })}
+                                
+                                {mode === 'structure' && (
+                                    <tr>
+                                        <td colSpan="7" className="p-2 text-center bg-gray-50">
+                                            <button onClick={() => setEditNodeModal({ action: 'add_category' })} className="text-purple-600 font-bold hover:underline px-4 py-2"><i className="fa-solid fa-plus mr-1"></i> 최상위 정책사업 신규 추가</button>
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
 
-                    {modalConfig && (
-                        <ActionModal 
-                            config={modalConfig} 
-                            budgets={budgets}
-                            onClose={() => setModalConfig(null)} 
-                            onConfirm={(data, extraBudgets, uploadedFiles) => {
-                                onTransaction(modalConfig.type, data.date, data.items, data.description, extraBudgets, uploadedFiles);
-                                setModalConfig(null);
-                            }} 
+                    {txModalType && <TransactionModal type={txModalType} budgets={budgets} onClose={() => setTxModalType(null)} onConfirm={(data, files) => { onTransaction(txModalType, data.date, data.items, data.description, files); setTxModalType(null); }} showAlert={showAlert} />}
+                    {editNodeModal && (
+                        <NodeEditModal 
+                            config={editNodeModal} budgets={draftBudgets} onClose={() => setEditNodeModal(null)}
+                            onSave={(newData) => {
+                                if (editNodeModal.action === 'rename') {
+                                    setDraftBudgets(prev => prev.map(b => b.id === editNodeModal.targetId ? { ...b, ...newData } : b));
+                                } else {
+                                    setDraftBudgets(prev => [...prev, { id: 'new_node_' + Date.now(), parent: editNodeModal.action === 'add_category' ? null : editNodeModal.targetId, type: editNodeModal.action === 'add_category' ? 'category' : (editNodeModal.action === 'add_sub' ? 'sub' : 'item'), amount: 0, requisitioned: 0, encumbered: 0, expended: 0, ...newData }]);
+                                }
+                                setEditNodeModal(null);
+                            }}
+                        />
+                    )}
+                    {adjustBudgetModal && (
+                        <BudgetAdjustModal 
+                            data={adjustBudgetModal} budgets={draftBudgets} onClose={() => setAdjustBudgetModal(null)}
+                            onSave={(newAmount) => {
+                                setDraftBudgets(prev => prev.map(b => b.id === adjustBudgetModal.id ? { ...b, amount: newAmount } : b));
+                                setAdjustBudgetModal(null);
+                            }}
+                        />
+                    )}
+                    {commitModalOpen && (
+                        <CommitModal 
+                            mode={mode} onClose={() => setCommitModalOpen(false)} showAlert={showAlert}
+                            onConfirm={(date, desc, files) => {
+                                onBatchTransaction(mode, date, desc, files, draftBudgets);
+                                setCommitModalOpen(false);
+                                setMode('view');
+                            }}
                         />
                     )}
                 </div>
@@ -515,76 +716,28 @@
         };
 
         // ==========================================
-        // Modal for Actions (수동 입력 및 파일 업로드 전용으로 전환)
+        // Modal: 일반 거래 (품의/지출)
         // ==========================================
-        const ActionModal = ({ config, budgets, onClose, onConfirm }) => {
-            const [date, setDate] = React.useState(config.date);
+        const TransactionModal = ({ type, budgets, onClose, onConfirm, showAlert }) => {
+            const [date, setDate] = React.useState(new Date().toISOString().split('T')[0]);
             const [description, setDescription] = React.useState('');
-            const [items, setItems] = React.useState([{ 
-                budgetId: '', categoryId: '', newCategoryName: '', subId: '', newSubName: '', 
-                subTitleAction: 'select', subTitle: '', title: '', amount: 0 
-            }]);
-            
-            // 파일 업로드 관련 상태
+            const [items, setItems] = React.useState([{ budgetId: '', amount: '' }]);
             const [filesToUpload, setFilesToUpload] = React.useState([]);
             const [isUploading, setIsUploading] = React.useState(false);
 
-            const handleFileSelect = (e) => {
-                if (e.target.files.length > 0) {
-                    setFilesToUpload(Array.from(e.target.files));
-                }
-            };
+            const title = type === 'requisition' ? '지출품의 수기 반영' : '원인행위 및 지출결의 반영';
 
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 setIsUploading(true);
+                const processedItems = items.map(item => ({ ...item, amount: isNaN(parseInt(item.amount)) ? 0 : parseInt(item.amount) }));
 
-                let extraBudgetsToCreate = [];
-                let newCatIdMap = {};
-                let newSubIdMap = {};
-
-                const processedItems = items.map((item, idx) => {
-                    if (config.type === 'adjustment' && item.budgetId === 'NEW') {
-                        let finalCategoryId = item.categoryId;
-                        let finalSubId = item.subId;
-
-                        if (item.categoryId === 'NEW_CATEGORY') {
-                            if (!newCatIdMap[item.newCategoryName]) {
-                                const newId = 'new_cat_' + Date.now() + '_' + idx;
-                                newCatIdMap[item.newCategoryName] = newId;
-                                extraBudgetsToCreate.push({ id: newId, parent: null, title: item.newCategoryName, type: 'category', amount: 0, requisitioned: 0, encumbered: 0, expended: 0 });
-                            }
-                            finalCategoryId = newCatIdMap[item.newCategoryName];
-                        }
-
-                        if (item.subId === 'NEW_SUB') {
-                            const subKey = finalCategoryId + '_' + item.newSubName;
-                            if (!newSubIdMap[subKey]) {
-                                const newId = 'new_sub_' + Date.now() + '_' + idx;
-                                newSubIdMap[subKey] = newId;
-                                extraBudgetsToCreate.push({ id: newId, parent: finalCategoryId, title: item.newSubName, type: 'sub', amount: 0, requisitioned: 0, encumbered: 0, expended: 0 });
-                            }
-                            finalSubId = newSubIdMap[subKey];
-                        }
-
-                        return {
-                            ...item, isNew: true, budgetId: 'new_item_' + Date.now() + '_' + idx,
-                            parent: finalSubId, subTitle: item.subTitle, title: item.title
-                        };
-                    }
-                    return item;
-                });
-
-                // Firebase Storage 업로드 로직 (연도/월별 폴더 분류)
                 let uploadedFileData = [];
                 if (filesToUpload.length > 0 && auth && auth.currentUser && storage) {
                     const appId = getAppId();
-                    const yearStr = date.substring(0, 4);
-                    const monthStr = date.substring(5, 7);
-                    
+                    const yearStr = date.substring(0, 4); const monthStr = date.substring(5, 7);
                     try {
                         for (const file of filesToUpload) {
-                            // Rule 1 준수: artifacts/{appId}/users/{userId}/...
                             const filePath = `artifacts/${appId}/users/${auth.currentUser.uid}/pdfs/${yearStr}/${monthStr}/${Date.now()}_${file.name}`;
                             const storageRef = storage.ref().child(filePath);
                             await storageRef.put(file);
@@ -592,141 +745,202 @@
                             uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
                         }
                     } catch (error) {
-                        console.error("File upload failed:", error);
-                        alert("파일 업로드에 실패했습니다. 관리자에게 문의하거나 권한을 확인하세요.");
-                        setIsUploading(false);
-                        return; // 실패 시 진행 중지
+                        showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
                     }
                 }
-
                 setIsUploading(false);
-                onConfirm({ date, description, items: processedItems }, extraBudgetsToCreate, uploadedFileData);
+                onConfirm({ date, description, items: processedItems }, uploadedFileData);
             };
 
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-                    <div className="bg-white rounded-lg p-6 w-[900px] max-w-5xl shadow-2xl my-8">
+                    <div className="bg-white rounded-lg p-6 w-[800px] max-w-4xl shadow-2xl my-8">
                         <div className="flex justify-between items-center mb-4 border-b pb-2">
-                            <h3 className="text-xl font-bold">{config.title}</h3>
-                            <button onClick={onClose} disabled={isUploading} className="text-gray-500 hover:text-black"><i className="fa-solid fa-xmark text-xl"></i></button>
+                            <h3 className="text-xl font-bold">{title}</h3>
+                            <button onClick={onClose} disabled={isUploading} className="text-gray-500 hover:text-black text-2xl"><i className="fa-solid fa-xmark"></i></button>
                         </div>
-
-                        {/* 증빙 자료(PDF) 업로드 섹션 */}
                         <div className="mb-4 bg-gray-50 p-4 rounded border border-gray-300">
-                            <label className="block text-sm font-bold text-gray-700 mb-2"><i className="fa-solid fa-folder-open text-yellow-600 mr-2"></i>증빙 자료 첨부 (선택사항)</label>
-                            <input type="file" accept=".pdf" multiple onChange={handleFileSelect} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-gray-600 file:text-white hover:file:bg-gray-700" />
-                            <p className="text-xs text-gray-500 mt-2">* 첨부된 파일은 클라우드(Storage)에 연도/월별로 안전하게 영구 보관되며, 장부 내역 탭에서 언제든 조회할 수 있습니다.</p>
+                            <label className="block text-sm font-bold text-gray-700 mb-2"><i className="fa-solid fa-folder-open text-yellow-600 mr-2"></i>증빙 자료 (PDF 등) 첨부</label>
+                            <input type="file" multiple onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
                         </div>
-
-                        <form onSubmit={handleSubmit}>
+                        <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('반드시 기입 또는 선택해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
                             <div className="grid grid-cols-2 gap-4 mb-4">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">처리 일자</label>
-                                    <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required className="w-full border rounded p-2 focus:ring focus:ring-blue-200" />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">적요 (건명)</label>
-                                    <input type="text" value={description} onChange={(e) => setDescription(e.target.value)} required placeholder="ex) 원어민 강사 수당 지급" className="w-full border rounded p-2 focus:ring focus:ring-blue-200" />
-                                </div>
+                                <div><label className="block text-sm font-bold mb-1">처리 일자</label><input type="date" value={date} onChange={e=>setDate(e.target.value)} required className="w-full border rounded p-2" /></div>
+                                <div><label className="block text-sm font-bold mb-1">적요 (건명)</label><input type="text" value={description} onChange={e=>setDescription(e.target.value)} required placeholder="예시) 강사 수당 지급" className="w-full border rounded p-2" /></div>
                             </div>
-
                             <div className="mb-4">
-                                <label className="block text-sm font-bold text-gray-700 mb-1">금액 반영 내역 (수기 작성)</label>
+                                <label className="block text-sm font-bold mb-1">금액 반영 내역</label>
                                 {items.map((item, index) => (
-                                    <div key={index} className="mb-2 p-3 bg-blue-50 rounded border border-blue-100">
-                                        <div className="flex space-x-2 items-center mb-2">
-                                            <select 
-                                                value={item.budgetId} 
-                                                onChange={(e) => {
-                                                    const newItems = [...items];
-                                                    newItems[index].budgetId = e.target.value;
-                                                    setItems(newItems);
-                                                }}
-                                                className="flex-1 border rounded p-2 text-sm"
-                                                required
-                                            >
-                                                <option value="">예산 내역(목) 직접 선택...</option>
-                                                {config.type === 'adjustment' && <option value="NEW" className="font-bold text-purple-600">+ 신규 예산 생성 (성립전)</option>}
-                                                {budgets.filter(b => b.type === 'item').map(b => (
-                                                    <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>
-                                                ))}
-                                            </select>
-
-                                            <input 
-                                                type="number" 
-                                                value={item.amount || ''} 
-                                                onChange={(e) => {
-                                                    const newItems = [...items];
-                                                    newItems[index].amount = parseInt(e.target.value) || 0;
-                                                    setItems(newItems);
-                                                }}
-                                                placeholder="금액 입력"
-                                                className="w-40 border rounded p-2 text-right font-bold"
-                                                required
-                                            />
-                                            <span className="text-sm font-bold">원</span>
-                                            {items.length > 1 && (
-                                                <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 hover:bg-red-100 p-2 rounded"><i className="fa-solid fa-trash"></i></button>
-                                            )}
-                                        </div>
-                                        
-                                        {/* 신규 목 생성 시 4계층 구조 UI */}
-                                        {item.budgetId === 'NEW' && config.type === 'adjustment' && (
-                                            <div className="flex flex-col space-y-3 mt-2 pt-3 border-t border-purple-200 bg-purple-50 p-3 rounded">
-                                                <div className="flex space-x-4">
-                                                    <div className="w-1/2">
-                                                        <label className="block text-xs font-bold text-gray-500 mb-1">1. 세부사업 (최상위 정책사업)</label>
-                                                        <select value={item.categoryId} onChange={e => {const v=e.target.value; const n=[...items]; n[index].categoryId=v; n[index].subId=v==='NEW_CATEGORY'?'NEW_SUB':''; setItems(n);}} className="w-full border rounded p-1.5 text-sm" required>
-                                                            <option value="">기존 세부사업 선택...</option>
-                                                            {budgets.filter(b => b.type === 'category').map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
-                                                            <option value="NEW_CATEGORY" className="font-bold text-purple-600">+ 신규 세부사업 작성</option>
-                                                        </select>
-                                                        {item.categoryId === 'NEW_CATEGORY' && <input type="text" placeholder="새 세부사업명 입력" value={item.newCategoryName} onChange={e => {const n=[...items]; n[index].newCategoryName=e.target.value; setItems(n)}} className="w-full border-2 border-purple-400 rounded p-1.5 text-sm mt-2" required />}
-                                                    </div>
-                                                    <div className="w-1/2">
-                                                        <label className="block text-xs font-bold text-gray-500 mb-1">2. 세부항목 (단위사업)</label>
-                                                        <select value={item.subId} onChange={e => {const n=[...items]; n[index].subId=e.target.value; setItems(n)}} className="w-full border rounded p-1.5 text-sm" required disabled={!item.categoryId}>
-                                                            <option value="">세부항목 선택...</option>
-                                                            {item.categoryId && item.categoryId !== 'NEW_CATEGORY' && budgets.filter(b => b.type === 'sub' && b.parent === item.categoryId).map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
-                                                            <option value="NEW_SUB" className="font-bold text-purple-600">+ 신규 세부항목 작성</option>
-                                                        </select>
-                                                        {item.subId === 'NEW_SUB' && <input type="text" placeholder="새 세부항목명 입력" value={item.newSubName} onChange={e => {const n=[...items]; n[index].newSubName=e.target.value; setItems(n)}} className="w-full border-2 border-purple-400 rounded p-1.5 text-sm mt-2" required />}
-                                                    </div>
-                                                </div>
-                                                <div className="flex space-x-4 mt-2">
-                                                    <div className="w-1/2">
-                                                        <label className="block text-xs font-bold text-gray-500 mb-1">3. 원가통계비목</label>
-                                                        <div className="flex space-x-2">
-                                                            {item.subId && item.subId !== 'NEW_SUB' && (
-                                                                <select value={item.subTitleAction} onChange={e => {const n=[...items]; n[index].subTitleAction=e.target.value; n[index].subTitle=''; setItems(n)}} className="w-1/3 border rounded p-1.5 text-sm"><option value="select">기존 비목</option><option value="new">+ 신규</option></select>
-                                                            )}
-                                                            {item.subTitleAction === 'select' && item.subId && item.subId !== 'NEW_SUB' ? (
-                                                                <select value={item.subTitle} onChange={e => {const n=[...items]; n[index].subTitle=e.target.value; setItems(n)}} className="w-2/3 border rounded p-1.5 text-sm" required>
-                                                                    <option value="">비목 선택...</option>
-                                                                    {Array.from(new Set(budgets.filter(b => b.parent === item.subId && b.type === 'item').map(b => b.subTitle))).map(st => <option key={st} value={st}>{st}</option>)}
-                                                                </select>
-                                                            ) : (
-                                                                <input type="text" placeholder="ex) 일반수용비" value={item.subTitle} onChange={e => {const n=[...items]; n[index].subTitle=e.target.value; setItems(n)}} className="flex-1 border-2 border-purple-400 rounded p-1.5 text-sm" required />
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                    <div className="w-1/2">
-                                                        <label className="block text-xs font-bold text-gray-500 mb-1">4. 산출내역 (최종 지출처)</label>
-                                                        <input type="text" placeholder="ex) 직업체험 강사수당" value={item.title} onChange={e => {const n=[...items]; n[index].title=e.target.value; setItems(n)}} className="w-full border rounded p-1.5 text-sm" required />
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        )}
+                                    <div key={index} className="flex space-x-2 items-center mb-2 bg-blue-50 p-2 rounded">
+                                        <select value={item.budgetId} onChange={e => {const n=[...items]; n[index].budgetId=e.target.value; setItems(n)}} className="flex-1 border rounded p-2 text-sm" required>
+                                            <option value="">예산 내역(목) 선택...</option>
+                                            {budgets.filter(b => b.type === 'item').map(b => <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>)}
+                                        </select>
+                                        <input type="number" value={item.amount} onChange={e => {const n=[...items]; n[index].amount=e.target.value; setItems(n)}} placeholder="금액" className="w-40 border rounded p-2 text-right font-bold" required />
+                                        <span className="font-bold text-sm">원</span>
+                                        {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 p-2"><i className="fa-solid fa-trash"></i></button>}
                                     </div>
                                 ))}
-                                <button type="button" onClick={() => setItems([...items, {budgetId: '', categoryId: '', newCategoryName: '', subId: '', newSubName: '', subTitleAction: 'select', subTitle: '', title: '', amount: 0}])} className="text-sm text-blue-600 hover:underline mt-1">+ 내역 추가</button>
+                                <button type="button" onClick={() => setItems([...items, {budgetId: '', amount: ''}])} className="text-sm text-blue-600 hover:underline">+ 내역 추가</button>
                             </div>
-
                             <div className="flex justify-end space-x-2 pt-4 border-t">
-                                <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300">취소</button>
-                                <button type="submit" disabled={isUploading} className="px-6 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold flex items-center">
-                                    {isUploading ? <><i className="fa-solid fa-spinner fa-spin mr-2"></i>클라우드 저장 중...</> : '장부 반영'}
-                                </button>
+                                <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 rounded font-bold">취소</button>
+                                <button type="submit" disabled={isUploading} className="px-6 py-2 bg-blue-600 text-white rounded font-bold">{isUploading ? '저장 중...' : '장부 반영'}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Modal: 목 편성 편집 (Rename/Add)
+        // ==========================================
+        const NodeEditModal = ({ config, budgets, onClose, onSave }) => {
+            const target = config.action === 'rename' ? budgets.find(b => b.id === config.targetId) : null;
+            const parent = config.action === 'add_sub' || config.action === 'add_item' ? budgets.find(b => b.id === config.targetId) : null;
+            
+            const [title, setTitle] = React.useState(target ? target.title : '');
+            const [subTitle, setSubTitle] = React.useState(target ? (target.subTitle || '') : '');
+
+            const isItem = config.action === 'add_item' || (target && target.type === 'item');
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSave({ title, subTitle: isItem ? subTitle : "" });
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]">
+                    <div className="bg-white rounded shadow-xl p-6 w-[500px]">
+                        <h3 className="text-lg font-bold mb-4 border-b pb-2">
+                            {config.action === 'rename' ? '목 이름 변경' : (config.action === 'add_category' ? '정책사업 신설' : `[${parent.title}] 하위 항목 신설`)}
+                        </h3>
+                        <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('이름을 입력해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
+                            {isItem && (
+                                <div className="mb-3">
+                                    <label className="block text-sm font-bold mb-1">원가통계비목</label>
+                                    <input type="text" value={subTitle} onChange={e=>setSubTitle(e.target.value)} required className="w-full border p-2 rounded" placeholder="예: 일반수용비" />
+                                </div>
+                            )}
+                            <div className="mb-4">
+                                <label className="block text-sm font-bold mb-1">{isItem ? '산출내역 (최종 지출처)' : '사업명'}</label>
+                                <input type="text" value={title} onChange={e=>setTitle(e.target.value)} required className="w-full border p-2 rounded" placeholder="이름을 입력하세요" />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                                <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 font-bold rounded">취소</button>
+                                <button type="submit" className="px-4 py-2 bg-purple-600 text-white rounded font-bold">확인</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Modal: 예산 조정
+        // ==========================================
+        const BudgetAdjustModal = ({ data, budgets, onClose, onSave }) => {
+            const item = budgets.find(b => b.id === data.id);
+            const currentAmt = parseInt(data.current) || 0;
+            const [diff, setDiff] = React.useState('');
+            const [newAmt, setNewAmt] = React.useState('');
+
+            const handleDiffChange = (e) => {
+                const val = e.target.value; setDiff(val);
+                if (val === '' || val === '-') setNewAmt('');
+                else setNewAmt(currentAmt + parseInt(val));
+            };
+
+            const handleNewChange = (e) => {
+                const val = e.target.value; setNewAmt(val);
+                if (val === '') setDiff('');
+                else setDiff(parseInt(val) - currentAmt);
+            };
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                onSave(parseInt(newAmt) || 0);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-[60]">
+                    <div className="bg-white rounded shadow-xl p-6 w-[500px]">
+                        <h3 className="text-lg font-bold mb-2 border-b pb-2">개별 예산액 조정</h3>
+                        <p className="text-sm text-gray-600 mb-4">[{item.subTitle}] {item.title}</p>
+                        <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('최종 금액을 확인해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                                <div><label className="block text-sm text-gray-500 mb-1">기존 예산액</label><input type="text" value={formatKRW(currentAmt)} disabled className="w-full border p-2 rounded bg-gray-100 text-right" /></div>
+                                <div><label className="block text-sm font-bold text-yellow-600 mb-1">증감액 (+/-)</label><input type="number" value={diff} onChange={handleDiffChange} className="w-full border-2 border-yellow-400 p-2 rounded text-right font-bold" placeholder="예: 500000 또는 -500000" /></div>
+                            </div>
+                            <div className="mb-4">
+                                <label className="block text-sm font-bold text-blue-600 mb-1">변경 후 최종 예산액</label>
+                                <input type="number" value={newAmt} onChange={handleNewChange} required className="w-full border-2 border-blue-400 p-2 rounded text-right font-bold text-lg" placeholder="최종 금액" />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                                <button type="button" onClick={onClose} className="px-4 py-2 bg-gray-200 font-bold rounded">취소</button>
+                                <button type="submit" className="px-4 py-2 bg-yellow-600 text-white rounded font-bold">확인</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // ==========================================
+        // Modal: 일괄 반영 (Commit)
+        // ==========================================
+        const CommitModal = ({ mode, onClose, onConfirm, showAlert }) => {
+            const [date, setDate] = React.useState(new Date().toISOString().split('T')[0]);
+            const [description, setDescription] = React.useState(mode === 'structure' ? '성립전예산 구조(목) 편성' : '예산액 수동 조정');
+            const [filesToUpload, setFilesToUpload] = React.useState([]);
+            const [isUploading, setIsUploading] = React.useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setIsUploading(true);
+
+                let uploadedFileData = [];
+                if (filesToUpload.length > 0 && auth && auth.currentUser && storage) {
+                    const appId = getAppId();
+                    const yearStr = date.substring(0, 4); const monthStr = date.substring(5, 7);
+                    try {
+                        for (const file of filesToUpload) {
+                            const filePath = `artifacts/${appId}/users/${auth.currentUser.uid}/pdfs/${yearStr}/${monthStr}/${Date.now()}_${file.name}`;
+                            const storageRef = storage.ref().child(filePath);
+                            await storageRef.put(file);
+                            const downloadUrl = await storageRef.getDownloadURL();
+                            uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
+                        }
+                    } catch (error) {
+                        showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
+                    }
+                }
+                setIsUploading(false);
+                onConfirm(date, description, uploadedFileData);
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-lg p-6 w-[600px] shadow-2xl">
+                        <h3 className="text-xl font-bold mb-4 border-b pb-2 text-red-600"><i className="fa-solid fa-check-double mr-2"></i>작업 내용 일괄 반영</h3>
+                        <p className="text-sm text-gray-600 mb-4">현재까지 조정한 내역을 장부에 확정 저장합니다. 내역에 표시될 사유와 근거 서류를 등록하세요.</p>
+                        <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('반드시 기입해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
+                            <div className="mb-4 bg-gray-50 p-3 rounded border">
+                                <label className="block text-sm font-bold mb-2">증빙 자료 (PDF 등) 첨부</label>
+                                <input type="file" multiple onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
+                            </div>
+                            <div className="mb-3">
+                                <label className="block text-sm font-bold mb-1">반영 일자</label>
+                                <input type="date" value={date} onChange={e=>setDate(e.target.value)} required className="w-full border rounded p-2" />
+                            </div>
+                            <div className="mb-6">
+                                <label className="block text-sm font-bold mb-1">적요 (변경 사유)</label>
+                                <input type="text" value={description} onChange={e=>setDescription(e.target.value)} required className="w-full border rounded p-2" />
+                            </div>
+                            <div className="flex justify-end space-x-2">
+                                <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 font-bold rounded">돌아가기</button>
+                                <button type="submit" disabled={isUploading} className="px-6 py-2 bg-red-600 text-white rounded font-bold">{isUploading ? '저장 중...' : '확인 및 최종 반영'}</button>
                             </div>
                         </form>
                     </div>
@@ -740,62 +954,47 @@
         const HistoryTab = ({ transactions, budgets, onPrint, onDelete }) => {
             const [searchTerm, setSearchTerm] = React.useState('');
             const [filterType, setFilterType] = React.useState('all');
-            const [sortOrder, setSortOrder] = React.useState('desc'); // 기본 내림차순(최신순)
-            const [selectedTx, setSelectedTx] = React.useState(null); // 모달 표시용 거래내역
+            const [sortOrder, setSortOrder] = React.useState('desc');
+            const [selectedTx, setSelectedTx] = React.useState(null);
 
-            // 위계(세부사업>세부항목>통계비목>산출내역) 풀네임 생성 유틸리티
             const getFullBudgetHierarchy = (budgetId) => {
                 const item = budgets.find(b => b.id === budgetId);
-                if (!item) return '알 수 없음/삭제됨';
-                
+                if (!item) return { fullPath: '삭제되었거나 알 수 없는 목', shortPath: '삭제됨', cat: '', sub: '', subTitle: '', title: '' };
                 const sub = budgets.find(b => b.id === item.parent);
                 const category = sub ? budgets.find(b => b.id === sub.parent) : null;
-                
-                const catStr = category ? category.title : '';
-                const subStr = sub ? sub.title : '';
-                
-                return {
-                    fullPath: `${catStr} > ${subStr} > ${item.subTitle} > ${item.title}`,
-                    shortPath: `[${item.subTitle}] ${item.title}`,
-                    cat: catStr, sub: subStr, subTitle: item.subTitle, title: item.title
-                };
+                const catStr = category ? category.title : ''; const subStr = sub ? sub.title : '';
+                return { fullPath: `${catStr} > ${subStr} > ${item.subTitle} > ${item.title}`, shortPath: `[${item.subTitle}] ${item.title}`, cat: catStr, sub: subStr, subTitle: item.subTitle, title: item.title };
             };
 
             const getTypeLabel = (type) => {
                 switch(type) {
                     case 'requisition': return <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold border border-green-300">품의</span>;
-                    case 'encumbrance': return <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold border border-orange-300">원인행위</span>;
-                    case 'expenditure': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-300">지출</span>;
-                    case 'adjustment': return <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-300">예산조정</span>;
+                    case 'expenditure': return <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold border border-blue-300">지출/원인행위</span>;
+                    case 'structure': return <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold border border-purple-300">목 편성</span>;
+                    case 'adjustment': return <span className="bg-yellow-100 text-yellow-700 px-2 py-1 rounded text-xs font-bold border border-yellow-300">예산 조정</span>;
                     default: return type;
                 }
             };
 
-            // 정렬 처리
             const sortedTransactions = [...transactions].sort((a, b) => {
-                const dateA = new Date(a.date).getTime();
-                const dateB = new Date(b.date).getTime();
+                const dateA = new Date(a.date).getTime(); const dateB = new Date(b.date).getTime();
                 return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
             });
 
-            // Flatten for display
             let displayRows = [];
             sortedTransactions.forEach(t => {
-                t.items.forEach((item, idx) => {
-                    displayRows.push({
-                        ...t, // 원본 트랜잭션 데이터 (id, date, type, description, attachedFiles 등)
-                        itemId: `${t.id}_${idx}`,
-                        budgetId: item.budgetId,
-                        amount: item.amount,
-                        isFirstInGroup: idx === 0,
-                        rowSpan: t.items.length
+                if (t.type === 'structure') {
+                    displayRows.push({ ...t, itemId: `${t.id}_structure`, budgetId: null, amount: 0, isFirstInGroup: true, rowSpan: 1 });
+                } else if (t.items && t.items.length > 0) {
+                    t.items.forEach((item, idx) => {
+                        displayRows.push({ ...t, itemId: `${t.id}_${idx}`, budgetId: item.budgetId, amount: item.amount, isFirstInGroup: idx === 0, rowSpan: t.items.length });
                     });
-                });
+                }
             });
 
             const filteredRows = displayRows.filter(row => {
-                const matchType = filterType === 'all' || row.type === filterType;
-                const matchSearch = row.description.includes(searchTerm) || getFullBudgetHierarchy(row.budgetId).shortPath.includes(searchTerm) || row.date.includes(searchTerm);
+                const matchType = filterType === 'all' || row.type === filterType || (filterType === 'adjustment' && row.type === 'structure');
+                const matchSearch = row.description.includes(searchTerm) || (row.budgetId ? getFullBudgetHierarchy(row.budgetId).shortPath.includes(searchTerm) : false) || row.date.includes(searchTerm);
                 return matchType && matchSearch;
             });
 
@@ -804,19 +1003,8 @@
                     <div className="flex justify-between items-center mb-6 no-print">
                         <h2 className="text-xl font-bold text-gray-800">예산 변동 내역 장부</h2>
                         <div className="flex space-x-2">
-                            <button 
-                                onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')} 
-                                className="border border-gray-300 rounded px-3 py-2 text-sm hover:bg-gray-100 font-bold"
-                            >
-                                <i className={`fa-solid fa-arrow-down-${sortOrder === 'desc' ? 'wide-short' : 'short-wide'} mr-1`}></i>
-                                일자 {sortOrder === 'desc' ? '내림차순' : '올림차순'}
-                            </button>
-                            <select value={filterType} onChange={e => setFilterType(e.target.value)} className="border rounded p-2 text-sm">
-                                <option value="all">전체 내역</option>
-                                <option value="requisition">품의 내역</option>
-                                <option value="expenditure">지출 내역</option>
-                                <option value="adjustment">예산/성립전 조정</option>
-                            </select>
+                            <button onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')} className="border border-gray-300 rounded px-3 py-2 text-sm hover:bg-gray-100 font-bold"><i className={`fa-solid fa-arrow-down-${sortOrder === 'desc' ? 'wide-short' : 'short-wide'} mr-1`}></i>일자 {sortOrder === 'desc' ? '내림차순' : '올림차순'}</button>
+                            <select value={filterType} onChange={e => setFilterType(e.target.value)} className="border rounded p-2 text-sm"><option value="all">전체 내역</option><option value="requisition">품의 내역</option><option value="expenditure">지출 내역</option><option value="adjustment">예산/목 조정</option></select>
                             <input type="text" placeholder="검색어 입력..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="border rounded p-2 w-64 text-sm" />
                             <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-2 rounded hover:bg-gray-700"><i className="fa-solid fa-print"></i></button>
                         </div>
@@ -827,19 +1015,19 @@
                             <thead className="table-header">
                                 <tr>
                                     <th className="w-[12%]">일자</th>
-                                    <th className="w-[8%]">구분</th>
-                                    <th className="w-[27%]">적요 (상세보기 클릭)</th>
+                                    <th className="w-[10%]">구분</th>
+                                    <th className="w-[25%]">적요 (상세보기 클릭)</th>
                                     <th className="w-[25%]">예산 목 (세부)</th>
-                                    <th className="w-[15%]">금액</th>
+                                    <th className="w-[15%]">금액 (증감)</th>
                                     <th className="w-[13%]">증빙/관리</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredRows.length === 0 ? (
-                                    <tr><td colSpan="6" className="text-center p-8 text-gray-500">기록된 내역이 없습니다.</td></tr>
-                                ) : (
+                                {filteredRows.length === 0 ? <tr><td colSpan="6" className="text-center p-8 text-gray-500">기록된 내역이 없습니다.</td></tr> : 
                                     filteredRows.map((row) => {
-                                        const hierarchy = getFullBudgetHierarchy(row.budgetId);
+                                        const isStruct = row.type === 'structure';
+                                        const isAdj = row.type === 'adjustment';
+                                        const hierarchy = isStruct ? null : getFullBudgetHierarchy(row.budgetId);
                                         return (
                                             <tr key={row.itemId} className="hover:bg-blue-50 border-b group">
                                                 {row.isFirstInGroup && <td className="p-3 text-center border-r" rowSpan={row.rowSpan}>{row.date}</td>}
@@ -850,58 +1038,87 @@
                                                     </td>
                                                 )}
                                                 <td className="p-3 border-r text-gray-700">
-                                                    <div className="text-xs text-gray-400 mb-1">{hierarchy.cat} &gt; {hierarchy.sub}</div>
-                                                    <div className="font-bold">[{hierarchy.subTitle}] {hierarchy.title}</div>
+                                                    {isStruct ? <span className="text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded">예산 구조 일괄 변경</span> : (
+                                                        // 요구사항 반영: 리스트에서는 원가통계비목, 산출내역만 심플하게 표시
+                                                        <div className="font-bold">[{hierarchy.subTitle}] {hierarchy.title}</div>
+                                                    )}
                                                 </td>
-                                                <td className="p-3 text-right font-mono font-bold border-r">{formatKRW(row.amount)} 원</td>
+                                                <td className="p-3 text-right font-mono font-bold border-r">
+                                                    {isStruct ? '-' : (
+                                                        // 지출 등에서 불필요한 + 기호 삭제, 오직 예산 조정(adjustment) 시에만 색상 및 +/- 기호 적용
+                                                        <span className={isAdj ? (row.amount > 0 ? "text-blue-600" : (row.amount < 0 ? "text-red-600" : "")) : ""}>
+                                                            {isAdj && row.amount > 0 ? '+' : ''}{formatKRW(row.amount)} 원
+                                                        </span>
+                                                    )}
+                                                </td>
                                                 {row.isFirstInGroup && (
                                                     <td className="p-3 text-center space-y-2" rowSpan={row.rowSpan}>
-                                                        {row.attachedFiles && row.attachedFiles.length > 0 && (
-                                                            <div className="text-xs text-green-600 font-bold mb-1"><i className="fa-solid fa-paperclip"></i> 첨부 {row.attachedFiles.length}건</div>
-                                                        )}
-                                                        <button onClick={() => onDelete(row.id)} className="text-red-500 hover:bg-red-50 border border-red-500 rounded px-2 py-1 text-xs transition-colors w-full">
-                                                            <i className="fa-solid fa-undo mr-1"></i>되돌리기
-                                                        </button>
+                                                        {row.attachedFiles && row.attachedFiles.length > 0 && <div className="text-xs text-green-600 font-bold mb-1"><i className="fa-solid fa-paperclip"></i> 첨부 {row.attachedFiles.length}건</div>}
+                                                        <button onClick={() => onDelete(row.id)} className="text-red-500 hover:bg-red-50 border border-red-500 rounded px-2 py-1 text-xs transition-colors w-full font-bold"><i className="fa-solid fa-rotate-left mr-1"></i>반영취소</button>
                                                     </td>
                                                 )}
                                             </tr>
                                         )
                                     })
-                                )}
+                                }
                             </tbody>
                         </table>
                     </div>
 
-                    {/* Transaction Detail Modal */}
                     {selectedTx && (
-                        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
-                            <div className="bg-white rounded-xl p-8 w-[800px] max-w-full shadow-2xl relative">
+                        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]">
+                            <div className="bg-white rounded-xl p-8 w-[800px] max-w-full shadow-2xl relative max-h-[90vh] overflow-y-auto">
                                 <button onClick={() => setSelectedTx(null)} className="absolute top-4 right-6 text-gray-400 hover:text-black text-2xl"><i className="fa-solid fa-xmark"></i></button>
                                 
                                 <div className="border-b pb-4 mb-4">
-                                    <div className="flex items-center space-x-3 mb-2">
-                                        {getTypeLabel(selectedTx.type)}
-                                        <span className="text-gray-500 font-bold"><i className="fa-regular fa-calendar mr-1"></i>{selectedTx.date}</span>
-                                    </div>
+                                    <div className="flex items-center space-x-3 mb-2">{getTypeLabel(selectedTx.type)}<span className="text-gray-500 font-bold"><i className="fa-regular fa-calendar mr-1"></i>{selectedTx.date}</span></div>
                                     <h3 className="text-2xl font-bold text-gray-900">{selectedTx.description}</h3>
                                 </div>
 
                                 <div className="mb-6">
-                                    <h4 className="text-sm font-bold text-gray-700 mb-3 bg-gray-100 p-2 rounded">예산 반영 내역 풀이</h4>
-                                    <ul className="space-y-3">
-                                        {selectedTx.items.map((item, idx) => {
-                                            const h = getFullBudgetHierarchy(item.budgetId);
-                                            return (
-                                                <li key={idx} className="flex justify-between items-center border border-blue-100 bg-blue-50 p-3 rounded">
-                                                    <div className="text-sm">
-                                                        <div className="text-gray-500 text-xs mb-1">{h.cat} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> {h.sub} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> <span className="text-purple-600 font-bold">{h.subTitle}</span></div>
-                                                        <div className="font-bold text-gray-800 text-base">{h.title}</div>
-                                                    </div>
-                                                    <div className="font-mono text-lg font-bold text-blue-700">{formatKRW(item.amount)} 원</div>
-                                                </li>
-                                            )
-                                        })}
-                                    </ul>
+                                    <h4 className="text-sm font-bold text-gray-700 mb-3 bg-gray-100 p-2 rounded">반영 내역 상세</h4>
+                                    
+                                    {selectedTx.type === 'structure' ? (
+                                        <div className="space-y-4">
+                                            {selectedTx.structureChanges.added.length > 0 && (
+                                                <div className="bg-green-50 border border-green-200 p-3 rounded">
+                                                    <h5 className="font-bold text-green-700 mb-2"><i className="fa-solid fa-plus mr-1"></i>신설 항목</h5>
+                                                    <ul className="text-sm list-disc pl-5 space-y-1">{selectedTx.structureChanges.added.map(b => <li key={b.id}>[{b.subTitle || '상위사업'}] {b.title}</li>)}</ul>
+                                                </div>
+                                            )}
+                                            {selectedTx.structureChanges.deleted.length > 0 && (
+                                                <div className="bg-red-50 border border-red-200 p-3 rounded">
+                                                    <h5 className="font-bold text-red-700 mb-2"><i className="fa-solid fa-trash mr-1"></i>삭제된 항목</h5>
+                                                    <ul className="text-sm list-disc pl-5 space-y-1">{selectedTx.structureChanges.deleted.map(b => <li key={b.id}>[{b.subTitle || '상위사업'}] {b.title}</li>)}</ul>
+                                                </div>
+                                            )}
+                                            {selectedTx.structureChanges.renamed.length > 0 && (
+                                                <div className="bg-blue-50 border border-blue-200 p-3 rounded">
+                                                    <h5 className="font-bold text-blue-700 mb-2"><i className="fa-solid fa-pen mr-1"></i>이름 변경</h5>
+                                                    <ul className="text-sm list-disc pl-5 space-y-1">{selectedTx.structureChanges.renamed.map(b => <li key={b.id}>[{b.newSubTitle || '상위사업'}] {b.newTitle}</li>)}</ul>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <ul className="space-y-3">
+                                            {selectedTx.items.map((item, idx) => {
+                                                const h = getFullBudgetHierarchy(item.budgetId);
+                                                return (
+                                                    <li key={idx} className="flex justify-between items-center border border-blue-100 bg-blue-50 p-3 rounded">
+                                                        <div className="text-sm">
+                                                            {/* 상세보기 모달에서는 요청대로 전체 위계를 명확히 보여줌 */}
+                                                            <div className="text-gray-500 text-xs mb-1">{h.cat} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> {h.sub} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> <span className="text-purple-600 font-bold">{h.subTitle}</span></div>
+                                                            <div className="font-bold text-gray-800 text-base">{h.title}</div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            {selectedTx.type === 'adjustment' && <div className="text-xs text-gray-500 mb-1">최종 금액: {formatKRW(item.newTotal)}</div>}
+                                                            <div className="font-mono text-lg font-bold text-blue-700">{item.amount > 0 && selectedTx.type === 'adjustment' ? '+' : ''}{formatKRW(item.amount)} 원</div>
+                                                        </div>
+                                                    </li>
+                                                )
+                                            })}
+                                        </ul>
+                                    )}
                                 </div>
 
                                 <div>
@@ -915,7 +1132,6 @@
                                                     <i className="fa-solid fa-file-pdf text-red-500 text-2xl mr-3"></i>
                                                     <div className="overflow-hidden">
                                                         <p className="text-sm font-bold text-gray-800 truncate group-hover:text-blue-600">{file.name}</p>
-                                                        <p className="text-xs text-gray-400 mt-1">클릭하여 열람 및 다운로드</p>
                                                     </div>
                                                 </a>
                                             ))}
@@ -932,7 +1148,7 @@
         // ==========================================
         // Tab 3: Chart & Schedule
         // ==========================================
-        const ChartTab = ({ transactions, budgets, year }) => {
+        const ChartTab = ({ transactions, year }) => {
             const chartRef = React.useRef(null);
             const chartInstance = React.useRef(null);
 
@@ -944,12 +1160,13 @@
                 const reqData = new Array(12).fill(0);
 
                 transactions.forEach(t => {
+                    if (t.type === 'structure') return;
                     const d = new Date(t.date);
                     const m = d.getMonth() + 1;
                     let index = m - 3;
                     if (index < 0) index += 12;
 
-                    const totalAmount = t.items.reduce((sum, item) => sum + item.amount, 0);
+                    const totalAmount = (t.items || []).reduce((sum, item) => sum + item.amount, 0);
                     if (t.type === 'expenditure') expData[index] += totalAmount;
                     if (t.type === 'requisition') reqData[index] += totalAmount;
                 });
@@ -961,7 +1178,7 @@
                     data: {
                         labels: months,
                         datasets: [
-                            { label: '월별 지출액', data: expData, backgroundColor: 'rgba(59, 130, 246, 0.7)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
+                            { label: '월별 지출/원인행위액', data: expData, backgroundColor: 'rgba(59, 130, 246, 0.7)', borderColor: 'rgb(59, 130, 246)', borderWidth: 1 },
                             { label: '월별 품의액', data: reqData, type: 'line', borderColor: 'rgb(16, 185, 129)', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.1 }
                         ]
                     },
