@@ -69,6 +69,11 @@
                 auth = firebase.auth();
                 db = firebase.firestore();
                 storage = firebase.storage();
+                
+                // 무한 로딩 버그 방지: 스토리지 업로드 타임아웃 7초 강제 설정
+                storage.setMaxUploadRetryTime(7000);
+                storage.setMaxOperationRetryTime(7000);
+                
                 isUsingCustomConfig = hasUserConfig;
             }
         } catch (error) {
@@ -764,7 +769,10 @@
                             uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
                         }
                     } catch (error) {
-                        showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
+                        console.error("Storage upload error:", error);
+                        showAlert("클라우드 스토리지 오류: 파이어베이스 콘솔에서 'Storage'를 시작하지 않았거나 규칙(권한)이 없습니다."); 
+                        setIsUploading(false); 
+                        return; 
                     }
                 }
                 
@@ -952,7 +960,10 @@
                             uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
                         }
                     } catch (error) {
-                        showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
+                        console.error("Storage upload error:", error);
+                        showAlert("클라우드 스토리지 오류: 파이어베이스 콘솔에서 'Storage'를 시작하지 않았거나 규칙(권한)이 없습니다."); 
+                        setIsUploading(false); 
+                        return; 
                     }
                 }
                 
