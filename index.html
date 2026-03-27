@@ -277,26 +277,31 @@
                 const newTransId = Date.now().toString();
                 const transactionRecord = { id: newTransId, date, type: mode, description, attachedFiles, timestamp: new Date().toISOString() };
                 
-                const oldMap = new Map(budgets.map(b => [b.id, b]));
-                const newMap = new Map(draftBudgets.map(b => [b.id, b]));
+                // 엄격한 문자열 치환 매핑 (저장 불가 버그 원천 차단)
+                const oldMap = new Map(budgets.map(b => [String(b.id), b]));
+                const newMap = new Map(draftBudgets.map(b => [String(b.id), b]));
 
                 if (mode === 'structure') {
-                    const added = draftBudgets.filter(b => !oldMap.has(b.id));
-                    const deleted = budgets.filter(b => !newMap.has(b.id));
+                    const added = draftBudgets.filter(b => !oldMap.has(String(b.id)));
+                    const deleted = budgets.filter(b => !newMap.has(String(b.id)));
                     const renamed = draftBudgets
-                        .filter(b => oldMap.has(b.id) && (oldMap.get(b.id).title !== b.title || oldMap.get(b.id).subTitle !== b.subTitle))
+                        .filter(b => oldMap.has(String(b.id)) && (oldMap.get(String(b.id)).title !== b.title || oldMap.get(String(b.id)).subTitle !== b.subTitle))
                         .map(b => ({
                             id: b.id,
                             newTitle: b.title, newSubTitle: b.subTitle || "",
-                            oldTitle: oldMap.get(b.id).title, oldSubTitle: oldMap.get(b.id).subTitle || ""
+                            oldTitle: oldMap.get(String(b.id)).title, oldSubTitle: oldMap.get(String(b.id)).subTitle || ""
                         }));
                     transactionRecord.structureChanges = { added, deleted, renamed };
                 } 
                 else if (mode === 'adjustment') {
-                    const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                    // 기존 금액과 새로운 금액이 다를 경우에만 타겟 아이템으로 추출
+                    const adjustedItems = draftBudgets.filter(b => {
+                        const idStr = String(b.id);
+                        return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
+                    });
                     transactionRecord.items = adjustedItems.map(b => ({
                         budgetId: b.id,
-                        amount: Number(b.amount || 0) - Number(oldMap.get(b.id).amount || 0),
+                        amount: Number(b.amount || 0) - Number(oldMap.get(String(b.id)).amount || 0),
                         newTotal: Number(b.amount || 0)
                     }));
                 }
@@ -309,21 +314,24 @@
                     if (mode === 'structure') {
                         const { added, deleted, renamed } = transactionRecord.structureChanges;
                         added.forEach(b => {
-                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                             batch.set(r, { ...b, subTitle: b.subTitle || "", requisitioned: 0, expended: 0, encumbered: 0 });
                         });
                         deleted.forEach(b => {
-                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                             batch.delete(r);
                         });
                         renamed.forEach(b => {
-                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                             batch.update(r, { title: b.newTitle, subTitle: b.newSubTitle });
                         });
                     } else if (mode === 'adjustment') {
-                        const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                        const adjustedItems = draftBudgets.filter(b => {
+                            const idStr = String(b.id);
+                            return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
+                        });
                         adjustedItems.forEach(b => {
-                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                             batch.update(r, { amount: Number(b.amount || 0) });
                         });
                     }
@@ -334,18 +342,21 @@
                     let nextBudgets = [...budgets];
                     if (mode === 'structure') {
                         const { added, deleted, renamed } = transactionRecord.structureChanges;
-                        const deletedIds = deleted.map(d => d.id);
-                        nextBudgets = nextBudgets.filter(b => !deletedIds.includes(b.id));
+                        const deletedIds = deleted.map(d => String(d.id));
+                        nextBudgets = nextBudgets.filter(b => !deletedIds.includes(String(b.id)));
                         nextBudgets = [...nextBudgets, ...added.map(b => ({ ...b, subTitle: b.subTitle || "", requisitioned: 0, expended: 0, encumbered: 0 }))];
                         renamed.forEach(r => {
-                            const idx = nextBudgets.findIndex(b => b.id === r.id);
-                            if (idx !== -1) { nextBudgets[idx].title = r.newTitle; nextBudgets[idx].subTitle = r.newSubTitle; }
+                            const idx = nextBudgets.findIndex(b => String(b.id) === String(r.id));
+                            if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], title: r.newTitle, subTitle: r.newSubTitle }; }
                         });
                     } else if (mode === 'adjustment') {
-                        const adjustedItems = draftBudgets.filter(b => oldMap.has(b.id) && Number(oldMap.get(b.id).amount || 0) !== Number(b.amount || 0));
+                        const adjustedItems = draftBudgets.filter(b => {
+                            const idStr = String(b.id);
+                            return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
+                        });
                         adjustedItems.forEach(adj => {
-                            const idx = nextBudgets.findIndex(b => b.id === adj.id);
-                            if (idx !== -1) nextBudgets[idx].amount = Number(adj.amount || 0);
+                            const idx = nextBudgets.findIndex(b => String(b.id) === String(adj.id));
+                            if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], amount: Number(adj.amount || 0) }; }
                         });
                     }
                     const nextTrans = [transactionRecord, ...transactions];
@@ -375,7 +386,7 @@
 
                             budgets.forEach(b => {
                                 if (budgetUpdates[b.id]) {
-                                    const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                    const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                                     const updates = budgetUpdates[b.id];
                                     batch.update(bRef, {
                                         requisitioned: (b.requisitioned || 0) + updates.req,
@@ -389,15 +400,15 @@
                         if (transToDelete.type === 'structure' && transToDelete.structureChanges) {
                             const { added, deleted, renamed } = transToDelete.structureChanges;
                             added.forEach(b => {
-                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                                 batch.delete(r);
                             });
                             deleted.forEach(b => {
-                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                                 batch.set(r, b);
                             });
                             renamed.forEach(b => {
-                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                                const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                                 batch.update(r, { title: b.oldTitle, subTitle: b.oldSubTitle });
                             });
                         }
@@ -409,7 +420,7 @@
                         }
                         await batch.commit();
                     } else {
-                        // 로컬 폴백 (되돌리기)
+                        // 로컬 폴백
                         let nextBudgets = [...budgets];
                         if (transToDelete.type === 'requisition' || transToDelete.type === 'expenditure' || transToDelete.type === 'adjustment') {
                             const budgetUpdates = {};
@@ -429,12 +440,12 @@
                         }
                         if (transToDelete.type === 'structure' && transToDelete.structureChanges) {
                             const { added, deleted, renamed } = transToDelete.structureChanges;
-                            const addedIds = added.map(a => a.id);
-                            nextBudgets = nextBudgets.filter(b => !addedIds.includes(b.id));
+                            const addedIds = added.map(a => String(a.id));
+                            nextBudgets = nextBudgets.filter(b => !addedIds.includes(String(b.id)));
                             nextBudgets = [...nextBudgets, ...deleted];
                             renamed.forEach(r => {
-                                const idx = nextBudgets.findIndex(b => b.id === r.id);
-                                if (idx !== -1) { nextBudgets[idx].title = r.oldTitle; nextBudgets[idx].subTitle = r.oldSubTitle; }
+                                const idx = nextBudgets.findIndex(b => String(b.id) === String(r.id));
+                                if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], title: r.oldTitle, subTitle: r.oldSubTitle }; }
                             });
                         }
                         const nextTrans = transactions.filter(t => t.id !== transId);
@@ -572,7 +583,7 @@
                         <h2 className="text-xl font-bold text-gray-800 flex items-center">
                             예산 현황 총괄표
                             {mode === 'structure' && <span className="ml-3 px-3 py-1 bg-purple-100 text-purple-700 rounded-full text-sm animate-pulse border border-purple-300"><i className="fa-solid fa-wrench mr-1"></i>목 편성 모드 진행 중</span>}
-                            {mode === 'budget' && <span className="ml-3 px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm animate-pulse border border-yellow-300"><i className="fa-solid fa-calculator mr-1"></i>예산 조정 모드 진행 중</span>}
+                            {mode === 'adjustment' && <span className="ml-3 px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm animate-pulse border border-yellow-300"><i className="fa-solid fa-calculator mr-1"></i>예산 조정 모드 진행 중</span>}
                         </h2>
                         
                         {mode === 'view' ? (
@@ -581,7 +592,7 @@
                                 <button onClick={() => setTxModalType('expenditure')} className="bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 text-sm"><i className="fa-solid fa-pen mr-1"></i> 원인행위/지출결의 반영</button>
                                 <div className="inline-block border-l-2 border-gray-300 h-6 mx-2 align-middle"></div>
                                 <button onClick={() => enterMode('structure')} className="bg-purple-600 text-white px-3 py-1.5 rounded hover:bg-purple-700 text-sm"><i className="fa-solid fa-layer-group mr-1"></i> 목 편성 모드</button>
-                                <button onClick={() => enterMode('budget')} className="bg-yellow-600 text-white px-3 py-1.5 rounded hover:bg-yellow-700 text-sm"><i className="fa-solid fa-scale-unbalanced mr-1"></i> 예산 조정 모드</button>
+                                <button onClick={() => enterMode('adjustment')} className="bg-yellow-600 text-white px-3 py-1.5 rounded hover:bg-yellow-700 text-sm"><i className="fa-solid fa-scale-unbalanced mr-1"></i> 예산 조정 모드</button>
                                 <button onClick={onPrint} className="bg-gray-600 text-white px-3 py-1.5 rounded hover:bg-gray-700 text-sm ml-2"><i className="fa-solid fa-print"></i></button>
                             </div>
                         ) : (
@@ -624,7 +635,7 @@
                                     else rowClass += "row-item";
 
                                     let amtClass = "table-cell font-bold ";
-                                    if (mode === 'budget') {
+                                    if (mode === 'adjustment') {
                                         const original = budgets.find(b => b.id === row.id);
                                         if (original && Number(original.amount) !== Number(row.amount)) amtClass += "text-blue-600 bg-blue-50";
                                     }
@@ -651,7 +662,7 @@
                                             <td className={amtClass}>
                                                 <div className="flex justify-between items-center">
                                                     <span>{formatKRW(row.amount)}</span>
-                                                    {mode === 'budget' && row.type === 'item' && (
+                                                    {mode === 'adjustment' && row.type === 'item' && (
                                                         <button onClick={() => setAdjustBudgetModal({ id: row.id, current: row.amount })} className="ml-2 text-yellow-600 hover:bg-yellow-100 px-1.5 py-0.5 rounded border border-yellow-400 shadow-sm" title="예산액 조정">
                                                             <i className="fa-solid fa-plus-minus"></i>
                                                         </button>
@@ -678,7 +689,7 @@
                         </table>
                     </div>
 
-                    {txModalType && <TransactionModal type={txModalType} budgets={budgets} onClose={() => setTxModalType(null)} onConfirm={(data, files) => { onTransaction(txModalType, data.date, data.items, data.description, files); setTxModalType(null); }} showAlert={showAlert} />}
+                    {txModalType && <TransactionModal type={txModalType} budgets={budgets} onClose={() => setTxModalType(null)} onConfirm={async (data, files) => { try { await onTransaction(txModalType, data.date, data.items, data.description, files); setTxModalType(null); showAlert("성공적으로 장부에 반영되었습니다."); } catch(e) { showAlert("오류: "+e.message); } }} showAlert={showAlert} />}
                     {editNodeModal && (
                         <NodeEditModal 
                             config={editNodeModal} budgets={draftBudgets} onClose={() => setEditNodeModal(null)}
@@ -704,10 +715,16 @@
                     {commitModalOpen && (
                         <CommitModal 
                             mode={mode} onClose={() => setCommitModalOpen(false)} showAlert={showAlert}
-                            onConfirm={(date, desc, files) => {
-                                onBatchTransaction(mode, date, desc, files, draftBudgets);
-                                setCommitModalOpen(false);
-                                setMode('view');
+                            onConfirm={async (date, desc, files) => {
+                                try {
+                                    await onBatchTransaction(mode, date, desc, files, draftBudgets);
+                                    setCommitModalOpen(false);
+                                    setMode('view');
+                                    showAlert("작업이 성공적으로 장부에 반영되었습니다.");
+                                } catch(e) {
+                                    setCommitModalOpen(false);
+                                    showAlert("저장 중 오류가 발생했습니다: " + e.message);
+                                }
                             }}
                         />
                     )}
@@ -716,12 +733,13 @@
         };
 
         // ==========================================
-        // Modal: 일반 거래 (품의/지출)
+        // Modal: 일반 거래 (품의/지출) 계층별 선택 적용
         // ==========================================
         const TransactionModal = ({ type, budgets, onClose, onConfirm, showAlert }) => {
             const [date, setDate] = React.useState(new Date().toISOString().split('T')[0]);
             const [description, setDescription] = React.useState('');
-            const [items, setItems] = React.useState([{ budgetId: '', amount: '' }]);
+            // 계층 선택을 위한 필드 세분화: categoryId, subId, budgetId
+            const [items, setItems] = React.useState([{ categoryId: '', subId: '', budgetId: '', amount: '' }]);
             const [filesToUpload, setFilesToUpload] = React.useState([]);
             const [isUploading, setIsUploading] = React.useState(false);
 
@@ -730,7 +748,8 @@
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 setIsUploading(true);
-                const processedItems = items.map(item => ({ ...item, amount: isNaN(parseInt(item.amount)) ? 0 : parseInt(item.amount) }));
+                // 제출 시 상위 항목(categoryId, subId)은 제외하고 서버가 원하는 형태(budgetId, amount)로만 정제하여 전송
+                const processedItems = items.map(item => ({ budgetId: item.budgetId, amount: isNaN(parseInt(item.amount)) ? 0 : parseInt(item.amount) }));
 
                 let uploadedFileData = [];
                 if (filesToUpload.length > 0 && auth && auth.currentUser && storage) {
@@ -748,13 +767,17 @@
                         showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
                     }
                 }
-                setIsUploading(false);
-                onConfirm({ date, description, items: processedItems }, uploadedFileData);
+                
+                try {
+                    await onConfirm({ date, description, items: processedItems }, uploadedFileData);
+                } catch(e) {
+                    setIsUploading(false);
+                }
             };
 
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-                    <div className="bg-white rounded-lg p-6 w-[800px] max-w-4xl shadow-2xl my-8">
+                    <div className="bg-white rounded-lg p-6 w-[900px] max-w-5xl shadow-2xl my-8">
                         <div className="flex justify-between items-center mb-4 border-b pb-2">
                             <h3 className="text-xl font-bold">{title}</h3>
                             <button onClick={onClose} disabled={isUploading} className="text-gray-500 hover:text-black text-2xl"><i className="fa-solid fa-xmark"></i></button>
@@ -771,20 +794,36 @@
                             <div className="mb-4">
                                 <label className="block text-sm font-bold mb-1">금액 반영 내역</label>
                                 {items.map((item, index) => (
-                                    <div key={index} className="flex space-x-2 items-center mb-2 bg-blue-50 p-2 rounded">
-                                        <select value={item.budgetId} onChange={e => {const n=[...items]; n[index].budgetId=e.target.value; setItems(n)}} className="flex-1 border rounded p-2 text-sm" required>
-                                            <option value="">예산 내역(목) 선택...</option>
-                                            {budgets.filter(b => b.type === 'item').map(b => <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>)}
-                                        </select>
-                                        <input type="number" value={item.amount} onChange={e => {const n=[...items]; n[index].amount=e.target.value; setItems(n)}} placeholder="금액" className="w-40 border rounded p-2 text-right font-bold" required />
-                                        <span className="font-bold text-sm">원</span>
-                                        {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 p-2"><i className="fa-solid fa-trash"></i></button>}
+                                    <div key={index} className="flex flex-col space-y-2 mb-3 bg-blue-50 p-3 rounded border border-blue-100">
+                                        <div className="flex space-x-2">
+                                            {/* 1단계: 정책사업 (최상위) 선택 */}
+                                            <select value={item.categoryId} onChange={e => {const n=[...items]; n[index].categoryId=e.target.value; n[index].subId=''; n[index].budgetId=''; setItems(n)}} className="w-1/3 border rounded p-1.5 text-sm font-bold text-gray-700" required>
+                                                <option value="">1. 정책사업 선택...</option>
+                                                {budgets.filter(b => b.type === 'category').map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+                                            </select>
+                                            {/* 2단계: 1단계에 종속된 단위사업 선택 */}
+                                            <select value={item.subId} onChange={e => {const n=[...items]; n[index].subId=e.target.value; n[index].budgetId=''; setItems(n)}} className="w-1/3 border rounded p-1.5 text-sm font-bold text-gray-700" required disabled={!item.categoryId}>
+                                                <option value="">2. 단위사업 선택...</option>
+                                                {budgets.filter(b => b.type === 'sub' && String(b.parent) === String(item.categoryId)).map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
+                                            </select>
+                                            {/* 3단계: 2단계에 종속된 최종 예산목(산출내역) 선택 */}
+                                            <select value={item.budgetId} onChange={e => {const n=[...items]; n[index].budgetId=e.target.value; setItems(n)}} className="w-1/3 border-2 border-blue-400 rounded p-1.5 text-sm font-bold text-blue-800" required disabled={!item.subId}>
+                                                <option value="">3. 원가통계비목 / 산출내역...</option>
+                                                {budgets.filter(b => b.type === 'item' && String(b.parent) === String(item.subId)).map(b => <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="flex justify-end items-center space-x-2 mt-2">
+                                            <label className="text-sm font-bold text-gray-700">금액 :</label>
+                                            <input type="number" value={item.amount} onChange={e => {const n=[...items]; n[index].amount=e.target.value; setItems(n)}} placeholder="지출/품의액 입력" className="w-48 border rounded p-2 text-right font-bold text-lg text-blue-900" required />
+                                            <span className="font-bold text-sm mr-4">원</span>
+                                            {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 hover:bg-red-100 px-3 py-1.5 rounded"><i className="fa-solid fa-trash"></i> 삭제</button>}
+                                        </div>
                                     </div>
                                 ))}
-                                <button type="button" onClick={() => setItems([...items, {budgetId: '', amount: ''}])} className="text-sm text-blue-600 hover:underline">+ 내역 추가</button>
+                                <button type="button" onClick={() => setItems([...items, {categoryId: '', subId: '', budgetId: '', amount: ''}])} className="text-sm text-blue-600 hover:underline font-bold">+ 예산 사용 내역 추가</button>
                             </div>
                             <div className="flex justify-end space-x-2 pt-4 border-t">
-                                <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 rounded font-bold">취소</button>
+                                <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 font-bold rounded">취소</button>
                                 <button type="submit" disabled={isUploading} className="px-6 py-2 bg-blue-600 text-white rounded font-bold">{isUploading ? '저장 중...' : '장부 반영'}</button>
                             </div>
                         </form>
@@ -916,8 +955,12 @@
                         showAlert("클라우드 서버 오류로 파일 업로드에 실패했습니다."); setIsUploading(false); return; 
                     }
                 }
-                setIsUploading(false);
-                onConfirm(date, description, uploadedFileData);
+                
+                try {
+                    await onConfirm(date, description, uploadedFileData);
+                } catch(e) {
+                    setIsUploading(false);
+                }
             };
 
             return (
@@ -958,10 +1001,10 @@
             const [selectedTx, setSelectedTx] = React.useState(null);
 
             const getFullBudgetHierarchy = (budgetId) => {
-                const item = budgets.find(b => b.id === budgetId);
+                const item = budgets.find(b => String(b.id) === String(budgetId));
                 if (!item) return { fullPath: '삭제되었거나 알 수 없는 목', shortPath: '삭제됨', cat: '', sub: '', subTitle: '', title: '' };
-                const sub = budgets.find(b => b.id === item.parent);
-                const category = sub ? budgets.find(b => b.id === sub.parent) : null;
+                const sub = budgets.find(b => String(b.id) === String(item.parent));
+                const category = sub ? budgets.find(b => String(b.id) === String(sub.parent)) : null;
                 const catStr = category ? category.title : ''; const subStr = sub ? sub.title : '';
                 return { fullPath: `${catStr} > ${subStr} > ${item.subTitle} > ${item.title}`, shortPath: `[${item.subTitle}] ${item.title}`, cat: catStr, sub: subStr, subTitle: item.subTitle, title: item.title };
             };
@@ -1039,13 +1082,11 @@
                                                 )}
                                                 <td className="p-3 border-r text-gray-700">
                                                     {isStruct ? <span className="text-purple-600 font-bold bg-purple-50 px-2 py-1 rounded">예산 구조 일괄 변경</span> : (
-                                                        // 요구사항 반영: 리스트에서는 원가통계비목, 산출내역만 심플하게 표시
                                                         <div className="font-bold">[{hierarchy.subTitle}] {hierarchy.title}</div>
                                                     )}
                                                 </td>
                                                 <td className="p-3 text-right font-mono font-bold border-r">
                                                     {isStruct ? '-' : (
-                                                        // 지출 등에서 불필요한 + 기호 삭제, 오직 예산 조정(adjustment) 시에만 색상 및 +/- 기호 적용
                                                         <span className={isAdj ? (row.amount > 0 ? "text-blue-600" : (row.amount < 0 ? "text-red-600" : "")) : ""}>
                                                             {isAdj && row.amount > 0 ? '+' : ''}{formatKRW(row.amount)} 원
                                                         </span>
@@ -1106,7 +1147,6 @@
                                                 return (
                                                     <li key={idx} className="flex justify-between items-center border border-blue-100 bg-blue-50 p-3 rounded">
                                                         <div className="text-sm">
-                                                            {/* 상세보기 모달에서는 요청대로 전체 위계를 명확히 보여줌 */}
                                                             <div className="text-gray-500 text-xs mb-1">{h.cat} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> {h.sub} <i className="fa-solid fa-chevron-right text-[10px] mx-1"></i> <span className="text-purple-600 font-bold">{h.subTitle}</span></div>
                                                             <div className="font-bold text-gray-800 text-base">{h.title}</div>
                                                         </div>
@@ -1160,7 +1200,7 @@
                 const reqData = new Array(12).fill(0);
 
                 transactions.forEach(t => {
-                    if (t.type === 'structure') return;
+                    if (t.type === 'structure') return; 
                     const d = new Date(t.date);
                     const m = d.getMonth() + 1;
                     let index = m - 3;
