@@ -16,11 +16,10 @@
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDKs (스토리지 모듈 삭제, DB 모듈만 사용) -->
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-storage-compat.js"></script>
 
     <style>
         body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background-color: #f3f4f6; }
@@ -58,7 +57,7 @@
             appId: "1:624606043611:web:414f3e46ed761caf719bfe"
         };
 
-        let firebaseApp, auth, db, storage;
+        let firebaseApp, auth, db;
         let isUsingCustomConfig = false;
         try {
             const hasUserConfig = USER_FIREBASE_CONFIG && USER_FIREBASE_CONFIG.apiKey && USER_FIREBASE_CONFIG.apiKey !== "YOUR_API_KEY";
@@ -68,12 +67,6 @@
                 firebaseApp = firebase.initializeApp(configToUse);
                 auth = firebase.auth();
                 db = firebase.firestore();
-                storage = firebase.storage();
-                
-                // 무한 로딩 버그 방지: 스토리지 업로드 타임아웃 7초 강제 설정
-                storage.setMaxUploadRetryTime(7000);
-                storage.setMaxOperationRetryTime(7000);
-                
                 isUsingCustomConfig = hasUserConfig;
             }
         } catch (error) {
@@ -120,7 +113,17 @@
         };
 
         // ==========================================
-        // UI Component: 공용 커스텀 모달 (Iframe Alert/Confirm 대체용)
+        // Utility: File to Base64 (스토리지 대체용 핵심 함수)
+        // ==========================================
+        const fileToBase64 = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = error => reject(error);
+        });
+
+        // ==========================================
+        // UI Component: 공용 커스텀 모달
         // ==========================================
         const DialogModal = ({ isOpen, message, isAlert, onConfirm, onCancel }) => {
             if (!isOpen) return null;
@@ -237,9 +240,35 @@
                 localStorage.setItem(`local_trans_${selectedYear}`, JSON.stringify(newTransactions));
             };
 
+            // DB 다운로드 기능 (스토리지 우회)
+            const downloadAttachment = async (fileId, fileName) => {
+                if (!auth || !user) {
+                    showAlert("로그인이 필요합니다.");
+                    return;
+                }
+                try {
+                    const appId = getAppId();
+                    const doc = await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(fileId).get();
+                    if (doc.exists) {
+                        const base64Data = doc.data().data;
+                        const a = document.createElement('a');
+                        a.href = base64Data;
+                        a.download = fileName;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                    } else {
+                        showAlert("서버에서 파일을 찾을 수 없습니다.");
+                    }
+                } catch (e) {
+                    console.error("Download error", e);
+                    showAlert("파일 다운로드 중 오류가 발생했습니다.");
+                }
+            };
+
             const handleTransaction = async (type, date, items, description, attachedFiles = []) => {
                 const newTransId = Date.now().toString();
-                const transactionRecord = { id: newTransId, date, type, items, description, attachedFiles, timestamp: new Date().toISOString() };
+                const transactionRecord = { id: newTransId, date, type, items, description, timestamp: new Date().toISOString() };
                 const budgetUpdates = {};
                 
                 items.forEach(item => {
@@ -252,11 +281,21 @@
                     const appId = getAppId();
                     const batch = db.batch();
                     const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
+                    
+                    // 파일 Base64 데이터를 별도의 컬렉션에 분리 저장하여 장부 용량 최적화
+                    if (attachedFiles && attachedFiles.length > 0) {
+                        attachedFiles.forEach(file => {
+                            const fRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(file.id);
+                            batch.set(fRef, { data: file.data, name: file.name, timestamp: new Date().toISOString() });
+                        });
+                        transactionRecord.attachedFiles = attachedFiles.map(f => ({ id: f.id, name: f.name }));
+                    }
+
                     batch.set(tRef, transactionRecord);
 
                     budgets.forEach(b => {
                         if (budgetUpdates[b.id]) {
-                            const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(b.id);
+                            const bRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
                             const updates = budgetUpdates[b.id];
                             batch.update(bRef, {
                                 requisitioned: (b.requisitioned || 0) + updates.req,
@@ -280,12 +319,12 @@
 
             const handleBatchTransaction = async (mode, date, description, attachedFiles, draftBudgets) => {
                 const newTransId = Date.now().toString();
-                const transactionRecord = { id: newTransId, date, type: mode, description, attachedFiles, timestamp: new Date().toISOString() };
+                const transactionRecord = { id: newTransId, date, type: mode, description, timestamp: new Date().toISOString() };
                 
-                // 엄격한 문자열 치환 매핑 (저장 불가 버그 원천 차단)
                 const oldMap = new Map(budgets.map(b => [String(b.id), b]));
                 const newMap = new Map(draftBudgets.map(b => [String(b.id), b]));
 
+                let adjustedItems = [];
                 if (mode === 'structure') {
                     const added = draftBudgets.filter(b => !oldMap.has(String(b.id)));
                     const deleted = budgets.filter(b => !newMap.has(String(b.id)));
@@ -299,22 +338,32 @@
                     transactionRecord.structureChanges = { added, deleted, renamed };
                 } 
                 else if (mode === 'adjustment') {
-                    // 기존 금액과 새로운 금액이 다를 경우에만 타겟 아이템으로 추출
-                    const adjustedItems = draftBudgets.filter(b => {
-                        const idStr = String(b.id);
-                        return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
+                    draftBudgets.forEach(b => {
+                        if (b.type === 'item') {
+                            const oldDoc = oldMap.get(String(b.id));
+                            const oldAmount = oldDoc ? Number(oldDoc.amount || 0) : 0;
+                            const newAmount = Number(b.amount || 0);
+                            
+                            if (oldAmount !== newAmount) {
+                                adjustedItems.push({ budgetId: String(b.id), amount: newAmount - oldAmount, newTotal: newAmount });
+                            }
+                        }
                     });
-                    transactionRecord.items = adjustedItems.map(b => ({
-                        budgetId: b.id,
-                        amount: Number(b.amount || 0) - Number(oldMap.get(String(b.id)).amount || 0),
-                        newTotal: Number(b.amount || 0)
-                    }));
+                    transactionRecord.items = adjustedItems;
                 }
 
                 if (auth && user) {
                     const appId = getAppId();
                     const batch = db.batch();
                     const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
+
+                    if (attachedFiles && attachedFiles.length > 0) {
+                        attachedFiles.forEach(file => {
+                            const fRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(file.id);
+                            batch.set(fRef, { data: file.data, name: file.name, timestamp: new Date().toISOString() });
+                        });
+                        transactionRecord.attachedFiles = attachedFiles.map(f => ({ id: f.id, name: f.name }));
+                    }
 
                     if (mode === 'structure') {
                         const { added, deleted, renamed } = transactionRecord.structureChanges;
@@ -331,13 +380,9 @@
                             batch.update(r, { title: b.newTitle, subTitle: b.newSubTitle });
                         });
                     } else if (mode === 'adjustment') {
-                        const adjustedItems = draftBudgets.filter(b => {
-                            const idStr = String(b.id);
-                            return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
-                        });
-                        adjustedItems.forEach(b => {
-                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(String(b.id));
-                            batch.update(r, { amount: Number(b.amount || 0) });
+                        adjustedItems.forEach(adj => {
+                            const r = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`budgets_${selectedYear}`).doc(adj.budgetId);
+                            batch.update(r, { amount: adj.newTotal });
                         });
                     }
 
@@ -355,13 +400,9 @@
                             if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], title: r.newTitle, subTitle: r.newSubTitle }; }
                         });
                     } else if (mode === 'adjustment') {
-                        const adjustedItems = draftBudgets.filter(b => {
-                            const idStr = String(b.id);
-                            return oldMap.has(idStr) && Number(oldMap.get(idStr).amount || 0) !== Number(b.amount || 0);
-                        });
                         adjustedItems.forEach(adj => {
-                            const idx = nextBudgets.findIndex(b => String(b.id) === String(adj.id));
-                            if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], amount: Number(adj.amount || 0) }; }
+                            const idx = nextBudgets.findIndex(b => String(b.id) === adj.budgetId);
+                            if (idx !== -1) { nextBudgets[idx] = { ...nextBudgets[idx], amount: adj.newTotal }; }
                         });
                     }
                     const nextTrans = [transactionRecord, ...transactions];
@@ -418,14 +459,15 @@
                             });
                         }
 
-                        if (transToDelete.attachedFiles && transToDelete.attachedFiles.length > 0 && storage) {
+                        // 트랜잭션 삭제 시 연결된 파일(DB)도 함께 청소
+                        if (transToDelete.attachedFiles && transToDelete.attachedFiles.length > 0) {
                             transToDelete.attachedFiles.forEach(file => {
-                                if (file.path) storage.ref().child(file.path).delete().catch(e => console.error(e));
+                                const fRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(file.id);
+                                batch.delete(fRef);
                             });
                         }
                         await batch.commit();
                     } else {
-                        // 로컬 폴백
                         let nextBudgets = [...budgets];
                         if (transToDelete.type === 'requisition' || transToDelete.type === 'expenditure' || transToDelete.type === 'adjustment') {
                             const budgetUpdates = {};
@@ -485,7 +527,7 @@
                         ) : (
                             <>
                                 {activeTab === 'overview' && <OverviewTab budgets={budgets} onTransaction={handleTransaction} onBatchTransaction={handleBatchTransaction} onPrint={() => window.print()} showAlert={showAlert} showConfirm={showConfirm} />}
-                                {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={() => window.print()} onDelete={handleDeleteTransaction} />}
+                                {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={() => window.print()} onDelete={handleDeleteTransaction} onDownload={downloadAttachment} />}
                                 {activeTab === 'chart' && <ChartTab transactions={transactions} year={selectedYear} />}
                             </>
                         )}
@@ -641,8 +683,8 @@
 
                                     let amtClass = "table-cell font-bold ";
                                     if (mode === 'adjustment') {
-                                        const original = budgets.find(b => b.id === row.id);
-                                        if (original && Number(original.amount) !== Number(row.amount)) amtClass += "text-blue-600 bg-blue-50";
+                                        const original = budgets.find(b => String(b.id) === String(row.id));
+                                        if (original && Number(original.amount || 0) !== Number(row.amount || 0)) amtClass += "text-blue-600 bg-blue-50";
                                     }
 
                                     return (
@@ -700,7 +742,7 @@
                             config={editNodeModal} budgets={draftBudgets} onClose={() => setEditNodeModal(null)}
                             onSave={(newData) => {
                                 if (editNodeModal.action === 'rename') {
-                                    setDraftBudgets(prev => prev.map(b => b.id === editNodeModal.targetId ? { ...b, ...newData } : b));
+                                    setDraftBudgets(prev => prev.map(b => String(b.id) === String(editNodeModal.targetId) ? { ...b, ...newData } : b));
                                 } else {
                                     setDraftBudgets(prev => [...prev, { id: 'new_node_' + Date.now(), parent: editNodeModal.action === 'add_category' ? null : editNodeModal.targetId, type: editNodeModal.action === 'add_category' ? 'category' : (editNodeModal.action === 'add_sub' ? 'sub' : 'item'), amount: 0, requisitioned: 0, encumbered: 0, expended: 0, ...newData }]);
                                 }
@@ -712,7 +754,7 @@
                         <BudgetAdjustModal 
                             data={adjustBudgetModal} budgets={draftBudgets} onClose={() => setAdjustBudgetModal(null)}
                             onSave={(newAmount) => {
-                                setDraftBudgets(prev => prev.map(b => b.id === adjustBudgetModal.id ? { ...b, amount: newAmount } : b));
+                                setDraftBudgets(prev => prev.map(b => String(b.id) === String(adjustBudgetModal.id) ? { ...b, amount: newAmount } : b));
                                 setAdjustBudgetModal(null);
                             }}
                         />
@@ -743,7 +785,6 @@
         const TransactionModal = ({ type, budgets, onClose, onConfirm, showAlert }) => {
             const [date, setDate] = React.useState(new Date().toISOString().split('T')[0]);
             const [description, setDescription] = React.useState('');
-            // 계층 선택을 위한 필드 세분화: categoryId, subId, budgetId
             const [items, setItems] = React.useState([{ categoryId: '', subId: '', budgetId: '', amount: '' }]);
             const [filesToUpload, setFilesToUpload] = React.useState([]);
             const [isUploading, setIsUploading] = React.useState(false);
@@ -753,26 +794,26 @@
             const handleSubmit = async (e) => {
                 e.preventDefault();
                 setIsUploading(true);
-                // 제출 시 상위 항목(categoryId, subId)은 제외하고 서버가 원하는 형태(budgetId, amount)로만 정제하여 전송
-                const processedItems = items.map(item => ({ budgetId: item.budgetId, amount: isNaN(parseInt(item.amount)) ? 0 : parseInt(item.amount) }));
+                
+                const processedItems = items.map(item => ({ budgetId: item.budgetId, amount: isNaN(parseInt(item.amount, 10)) ? 0 : parseInt(item.amount, 10) }));
 
                 let uploadedFileData = [];
-                if (filesToUpload.length > 0 && auth && auth.currentUser && storage) {
-                    const appId = getAppId();
-                    const yearStr = date.substring(0, 4); const monthStr = date.substring(5, 7);
+                if (filesToUpload.length > 0) {
                     try {
                         for (const file of filesToUpload) {
-                            const filePath = `artifacts/${appId}/users/${auth.currentUser.uid}/pdfs/${yearStr}/${monthStr}/${Date.now()}_${file.name}`;
-                            const storageRef = storage.ref().child(filePath);
-                            await storageRef.put(file);
-                            const downloadUrl = await storageRef.getDownloadURL();
-                            uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
+                            if (file.size > 800 * 1024) {
+                                showAlert(`파일 크기 초과: ${file.name}\n(800KB 이하의 소형 PDF만 첨부 가능합니다.)`);
+                                setIsUploading(false); return;
+                            }
+                            const base64Data = await fileToBase64(file);
+                            uploadedFileData.push({
+                                id: 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                                name: file.name,
+                                data: base64Data
+                            });
                         }
                     } catch (error) {
-                        console.error("Storage upload error:", error);
-                        showAlert("클라우드 스토리지 오류: 파이어베이스 콘솔에서 'Storage'를 시작하지 않았거나 규칙(권한)이 없습니다."); 
-                        setIsUploading(false); 
-                        return; 
+                        showAlert("파일 변환 중 오류가 발생했습니다."); setIsUploading(false); return; 
                     }
                 }
                 
@@ -784,15 +825,16 @@
             };
 
             return (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 overflow-y-auto">
-                    <div className="bg-white rounded-lg p-6 w-[900px] max-w-5xl shadow-2xl my-8">
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] overflow-y-auto">
+                    <div className="bg-white rounded-lg p-6 w-[1000px] max-w-[95vw] shadow-2xl my-8">
                         <div className="flex justify-between items-center mb-4 border-b pb-2">
                             <h3 className="text-xl font-bold">{title}</h3>
                             <button onClick={onClose} disabled={isUploading} className="text-gray-500 hover:text-black text-2xl"><i className="fa-solid fa-xmark"></i></button>
                         </div>
                         <div className="mb-4 bg-gray-50 p-4 rounded border border-gray-300">
-                            <label className="block text-sm font-bold text-gray-700 mb-2"><i className="fa-solid fa-folder-open text-yellow-600 mr-2"></i>증빙 자료 (PDF 등) 첨부</label>
-                            <input type="file" multiple onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
+                            <label className="block text-sm font-bold text-gray-700 mb-2"><i className="fa-solid fa-folder-open text-yellow-600 mr-2"></i>증빙 자료 (PDF 등) 첨부 (최대 800KB)</label>
+                            <input type="file" multiple accept=".pdf" onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
+                            <p className="text-xs text-gray-500 mt-2">* 데이터베이스 용량 최적화를 위해 800KB 이하의 파일만 첨부할 수 있습니다.</p>
                         </div>
                         <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('반드시 기입 또는 선택해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
                             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -800,35 +842,32 @@
                                 <div><label className="block text-sm font-bold mb-1">적요 (건명)</label><input type="text" value={description} onChange={e=>setDescription(e.target.value)} required placeholder="예시) 강사 수당 지급" className="w-full border rounded p-2" /></div>
                             </div>
                             <div className="mb-4">
-                                <label className="block text-sm font-bold mb-1">금액 반영 내역</label>
+                                <label className="block text-sm font-bold mb-1">금액 반영 내역 (계층별 목 선택)</label>
                                 {items.map((item, index) => (
-                                    <div key={index} className="flex flex-col space-y-2 mb-3 bg-blue-50 p-3 rounded border border-blue-100">
+                                    <div key={index} className="flex flex-col space-y-2 mb-3 bg-blue-50 p-4 rounded border border-blue-200 shadow-sm">
                                         <div className="flex space-x-2">
-                                            {/* 1단계: 정책사업 (최상위) 선택 */}
                                             <select value={item.categoryId} onChange={e => {const n=[...items]; n[index].categoryId=e.target.value; n[index].subId=''; n[index].budgetId=''; setItems(n)}} className="w-1/3 border rounded p-1.5 text-sm font-bold text-gray-700" required>
                                                 <option value="">1. 정책사업 선택...</option>
                                                 {budgets.filter(b => b.type === 'category').map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
                                             </select>
-                                            {/* 2단계: 1단계에 종속된 단위사업 선택 */}
                                             <select value={item.subId} onChange={e => {const n=[...items]; n[index].subId=e.target.value; n[index].budgetId=''; setItems(n)}} className="w-1/3 border rounded p-1.5 text-sm font-bold text-gray-700" required disabled={!item.categoryId}>
                                                 <option value="">2. 단위사업 선택...</option>
                                                 {budgets.filter(b => b.type === 'sub' && String(b.parent) === String(item.categoryId)).map(b => <option key={b.id} value={b.id}>{b.title}</option>)}
                                             </select>
-                                            {/* 3단계: 2단계에 종속된 최종 예산목(산출내역) 선택 */}
                                             <select value={item.budgetId} onChange={e => {const n=[...items]; n[index].budgetId=e.target.value; setItems(n)}} className="w-1/3 border-2 border-blue-400 rounded p-1.5 text-sm font-bold text-blue-800" required disabled={!item.subId}>
-                                                <option value="">3. 원가통계비목 / 산출내역...</option>
+                                                <option value="">3. 원가통계비목 및 산출내역...</option>
                                                 {budgets.filter(b => b.type === 'item' && String(b.parent) === String(item.subId)).map(b => <option key={b.id} value={b.id}>[{b.subTitle}] {b.title}</option>)}
                                             </select>
                                         </div>
-                                        <div className="flex justify-end items-center space-x-2 mt-2">
+                                        <div className="flex justify-end items-center space-x-2 mt-2 border-t border-blue-100 pt-2">
                                             <label className="text-sm font-bold text-gray-700">금액 :</label>
-                                            <input type="number" value={item.amount} onChange={e => {const n=[...items]; n[index].amount=e.target.value; setItems(n)}} placeholder="지출/품의액 입력" className="w-48 border rounded p-2 text-right font-bold text-lg text-blue-900" required />
+                                            <input type="number" value={item.amount} onChange={e => {const n=[...items]; n[index].amount=e.target.value; setItems(n)}} placeholder="지출/품의액 입력" className="w-48 border border-gray-400 rounded p-2 text-right font-bold text-lg text-blue-900" required />
                                             <span className="font-bold text-sm mr-4">원</span>
-                                            {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 hover:bg-red-100 px-3 py-1.5 rounded"><i className="fa-solid fa-trash"></i> 삭제</button>}
+                                            {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))} className="text-red-500 hover:bg-red-100 px-3 py-1.5 rounded"><i className="fa-solid fa-trash mr-1"></i>삭제</button>}
                                         </div>
                                     </div>
                                 ))}
-                                <button type="button" onClick={() => setItems([...items, {categoryId: '', subId: '', budgetId: '', amount: ''}])} className="text-sm text-blue-600 hover:underline font-bold">+ 예산 사용 내역 추가</button>
+                                <button type="button" onClick={() => setItems([...items, {categoryId: '', subId: '', budgetId: '', amount: ''}])} className="text-sm text-blue-600 hover:underline font-bold">+ 예산 사용 내역 행 추가</button>
                             </div>
                             <div className="flex justify-end space-x-2 pt-4 border-t">
                                 <button type="button" onClick={onClose} disabled={isUploading} className="px-4 py-2 bg-gray-200 font-bold rounded">취소</button>
@@ -844,8 +883,8 @@
         // Modal: 목 편성 편집 (Rename/Add)
         // ==========================================
         const NodeEditModal = ({ config, budgets, onClose, onSave }) => {
-            const target = config.action === 'rename' ? budgets.find(b => b.id === config.targetId) : null;
-            const parent = config.action === 'add_sub' || config.action === 'add_item' ? budgets.find(b => b.id === config.targetId) : null;
+            const target = config.action === 'rename' ? budgets.find(b => String(b.id) === String(config.targetId)) : null;
+            const parent = config.action === 'add_sub' || config.action === 'add_item' ? budgets.find(b => String(b.id) === String(config.targetId)) : null;
             
             const [title, setTitle] = React.useState(target ? target.title : '');
             const [subTitle, setSubTitle] = React.useState(target ? (target.subTitle || '') : '');
@@ -888,26 +927,26 @@
         // Modal: 예산 조정
         // ==========================================
         const BudgetAdjustModal = ({ data, budgets, onClose, onSave }) => {
-            const item = budgets.find(b => b.id === data.id);
-            const currentAmt = parseInt(data.current) || 0;
+            const item = budgets.find(b => String(b.id) === String(data.id));
+            const currentAmt = Number(item.amount) || 0;
             const [diff, setDiff] = React.useState('');
-            const [newAmt, setNewAmt] = React.useState('');
+            const [newAmt, setNewAmt] = React.useState(currentAmt === 0 ? '' : currentAmt);
 
             const handleDiffChange = (e) => {
                 const val = e.target.value; setDiff(val);
                 if (val === '' || val === '-') setNewAmt('');
-                else setNewAmt(currentAmt + parseInt(val));
+                else setNewAmt(currentAmt + parseInt(val, 10));
             };
 
             const handleNewChange = (e) => {
                 const val = e.target.value; setNewAmt(val);
                 if (val === '') setDiff('');
-                else setDiff(parseInt(val) - currentAmt);
+                else setDiff(parseInt(val, 10) - currentAmt);
             };
 
             const handleSubmit = (e) => {
                 e.preventDefault();
-                onSave(parseInt(newAmt) || 0);
+                onSave(Number(newAmt) || 0);
             };
 
             return (
@@ -948,22 +987,22 @@
                 setIsUploading(true);
 
                 let uploadedFileData = [];
-                if (filesToUpload.length > 0 && auth && auth.currentUser && storage) {
-                    const appId = getAppId();
-                    const yearStr = date.substring(0, 4); const monthStr = date.substring(5, 7);
+                if (filesToUpload.length > 0) {
                     try {
                         for (const file of filesToUpload) {
-                            const filePath = `artifacts/${appId}/users/${auth.currentUser.uid}/pdfs/${yearStr}/${monthStr}/${Date.now()}_${file.name}`;
-                            const storageRef = storage.ref().child(filePath);
-                            await storageRef.put(file);
-                            const downloadUrl = await storageRef.getDownloadURL();
-                            uploadedFileData.push({ name: file.name, url: downloadUrl, path: filePath });
+                            if (file.size > 800 * 1024) {
+                                showAlert(`파일 크기 초과: ${file.name}\n(800KB 이하의 소형 PDF만 첨부 가능합니다.)`);
+                                setIsUploading(false); return;
+                            }
+                            const base64Data = await fileToBase64(file);
+                            uploadedFileData.push({
+                                id: 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                                name: file.name,
+                                data: base64Data
+                            });
                         }
                     } catch (error) {
-                        console.error("Storage upload error:", error);
-                        showAlert("클라우드 스토리지 오류: 파이어베이스 콘솔에서 'Storage'를 시작하지 않았거나 규칙(권한)이 없습니다."); 
-                        setIsUploading(false); 
-                        return; 
+                        showAlert("파일 변환 중 오류가 발생했습니다."); setIsUploading(false); return; 
                     }
                 }
                 
@@ -975,14 +1014,14 @@
             };
 
             return (
-                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50">
+                <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60]">
                     <div className="bg-white rounded-lg p-6 w-[600px] shadow-2xl">
                         <h3 className="text-xl font-bold mb-4 border-b pb-2 text-red-600"><i className="fa-solid fa-check-double mr-2"></i>작업 내용 일괄 반영</h3>
                         <p className="text-sm text-gray-600 mb-4">현재까지 조정한 내역을 장부에 확정 저장합니다. 내역에 표시될 사유와 근거 서류를 등록하세요.</p>
                         <form onSubmit={handleSubmit} onInvalid={(e) => e.target.setCustomValidity('반드시 기입해주세요.')} onChange={(e) => e.target.setCustomValidity('')}>
                             <div className="mb-4 bg-gray-50 p-3 rounded border">
-                                <label className="block text-sm font-bold mb-2">증빙 자료 (PDF 등) 첨부</label>
-                                <input type="file" multiple onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
+                                <label className="block text-sm font-bold mb-2">증빙 자료 (PDF 등) 첨부 (최대 800KB)</label>
+                                <input type="file" multiple accept=".pdf" onChange={(e) => setFilesToUpload(Array.from(e.target.files))} className="block w-full text-sm" />
                             </div>
                             <div className="mb-3">
                                 <label className="block text-sm font-bold mb-1">반영 일자</label>
@@ -1005,7 +1044,7 @@
         // ==========================================
         // Tab 2: History & Detail Modal
         // ==========================================
-        const HistoryTab = ({ transactions, budgets, onPrint, onDelete }) => {
+        const HistoryTab = ({ transactions, budgets, onPrint, onDelete, onDownload }) => {
             const [searchTerm, setSearchTerm] = React.useState('');
             const [filterType, setFilterType] = React.useState('all');
             const [sortOrder, setSortOrder] = React.useState('desc');
@@ -1179,12 +1218,13 @@
                                     ) : (
                                         <div className="grid grid-cols-2 gap-3">
                                             {selectedTx.attachedFiles.map((file, idx) => (
-                                                <a key={idx} href={file.url} target="_blank" rel="noopener noreferrer" className="flex items-center p-3 border rounded hover:bg-gray-50 hover:border-blue-400 transition-colors group">
+                                                <button key={idx} onClick={() => onDownload(file.id, file.name)} className="flex items-center p-3 border rounded hover:bg-gray-50 hover:border-blue-400 transition-colors group text-left w-full">
                                                     <i className="fa-solid fa-file-pdf text-red-500 text-2xl mr-3"></i>
                                                     <div className="overflow-hidden">
                                                         <p className="text-sm font-bold text-gray-800 truncate group-hover:text-blue-600">{file.name}</p>
+                                                        <p className="text-xs text-gray-400 mt-1">클릭하여 다운로드</p>
                                                     </div>
-                                                </a>
+                                                </button>
                                             ))}
                                         </div>
                                     )}
