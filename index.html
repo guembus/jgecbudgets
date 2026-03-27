@@ -114,16 +114,6 @@
             return month < 3 ? year - 1 : year;
         };
 
-        // 무한 회계연도 생성기 (현재 년도 기준 -5년 ~ +10년)
-        const generateYears = () => {
-            const currentYear = getFiscalYear();
-            const years = [];
-            for(let i = currentYear - 5; i <= currentYear + 10; i++) {
-                years.push(i);
-            }
-            return years;
-        };
-
         const App = () => {
             const [user, setUser] = React.useState(null);
             const [activeTab, setActiveTab] = React.useState('overview');
@@ -133,8 +123,6 @@
             const [loading, setLoading] = React.useState(true);
             const [dbStatus, setDbStatus] = React.useState('connecting');
             const [dbErrorMessage, setDbErrorMessage] = React.useState('');
-
-            const yearsList = React.useMemo(() => generateYears(), []);
 
             React.useEffect(() => {
                 if (!auth) {
@@ -333,17 +321,15 @@
                     <header className="bg-blue-800 text-white p-4 shadow-md no-print flex justify-between items-center">
                         <div className="flex items-center space-x-4">
                             <h1 className="text-2xl font-bold"><i className="fa-solid fa-school mr-2"></i>장성글로컬교육센터 예산 관리</h1>
-                            <div className="bg-blue-700 rounded px-3 py-1 flex items-center">
-                                <span className="text-sm mr-2">회계연도:</span>
-                                <select 
-                                    className="bg-transparent text-white font-bold outline-none"
-                                    value={selectedYear}
-                                    onChange={(e) => setSelectedYear(parseInt(e.target.value))}
-                                >
-                                    {yearsList.map(y => (
-                                        <option key={y} value={y} className="text-black">{y}년 ({y}.3 ~ {y+1}.2)</option>
-                                    ))}
-                                </select>
+                            <div className="bg-blue-700 rounded px-3 py-1 flex items-center space-x-3 shadow-inner">
+                                <span className="text-sm text-blue-200 font-bold">회계연도:</span>
+                                <button onClick={() => setSelectedYear(y => y - 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="이전 연도">
+                                    <i className="fa-solid fa-chevron-left"></i>
+                                </button>
+                                <span className="font-bold text-lg w-40 text-center tracking-wide">{selectedYear}년 <span className="text-xs font-normal text-blue-200">({selectedYear}.3~{selectedYear+1}.2)</span></span>
+                                <button onClick={() => setSelectedYear(y => y + 1)} className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-blue-600 transition-colors" title="다음 연도">
+                                    <i className="fa-solid fa-chevron-right"></i>
+                                </button>
                             </div>
 
                             <div className="flex items-center text-xs ml-4 border border-blue-600 rounded px-2 py-1 bg-blue-900 cursor-help group relative">
