@@ -16,7 +16,7 @@
     <!-- Babel -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Firebase SDKs (스토리지 모듈 삭제, DB 모듈만 사용) -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
@@ -113,7 +113,7 @@
         };
 
         // ==========================================
-        // Utility: File to Base64 (스토리지 대체용 핵심 함수)
+        // Utility: File to Base64
         // ==========================================
         const fileToBase64 = (file) => new Promise((resolve, reject) => {
             const reader = new FileReader();
@@ -240,12 +240,9 @@
                 localStorage.setItem(`local_trans_${selectedYear}`, JSON.stringify(newTransactions));
             };
 
-            // DB 다운로드 기능 (스토리지 우회)
+            // DB 파일 다운로드
             const downloadAttachment = async (fileId, fileName) => {
-                if (!auth || !user) {
-                    showAlert("로그인이 필요합니다.");
-                    return;
-                }
+                if (!auth || !user) { showAlert("로그인이 필요합니다."); return; }
                 try {
                     const appId = getAppId();
                     const doc = await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(fileId).get();
@@ -266,6 +263,55 @@
                 }
             };
 
+            // DB 파일 브라우저 뷰어 열람 (Base64 -> Blob -> Object URL 변환)
+            const viewAttachment = async (fileId, fileName) => {
+                if (!auth || !user) { showAlert("로그인이 필요합니다."); return; }
+                
+                // 팝업 차단을 방지하기 위해 사용자가 클릭하자마자 빈 창을 띄움
+                const newWindow = window.open('', '_blank');
+                if (newWindow) {
+                    newWindow.document.title = fileName;
+                    newWindow.document.body.innerHTML = `
+                        <div style="display:flex; justify-content:center; items-align:center; height:100vh; font-family:sans-serif;">
+                            <h2>서버에서 문서를 불러오는 중입니다... 잠시만 기다려주세요.</h2>
+                        </div>
+                    `;
+                } else {
+                    showAlert("팝업 차단이 설정되어 있습니다. 브라우저 설정에서 팝업 차단을 해제해주세요.");
+                    return;
+                }
+
+                try {
+                    const appId = getAppId();
+                    const doc = await db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(fileId).get();
+                    if (doc.exists) {
+                        const base64Data = doc.data().data;
+                        // Base64 포맷 분리 (예: data:application/pdf;base64,JVBER...)
+                        const arr = base64Data.split(',');
+                        const mimeMatch = arr[0].match(/:(.*?);/);
+                        const mime = mimeMatch ? mimeMatch[1] : 'application/pdf';
+                        const bstr = atob(arr[1]);
+                        let n = bstr.length;
+                        const u8arr = new Uint8Array(n);
+                        while (n--) {
+                            u8arr[n] = bstr.charCodeAt(n);
+                        }
+                        const blob = new Blob([u8arr], { type: mime });
+                        const blobUrl = URL.createObjectURL(blob);
+                        
+                        // 열어둔 빈 창의 경로를 변환된 문서 URL로 덮어씌움
+                        newWindow.location.href = blobUrl;
+                    } else {
+                        newWindow.close();
+                        showAlert("서버에서 파일을 찾을 수 없습니다.");
+                    }
+                } catch (e) {
+                    console.error("View error", e);
+                    newWindow.close();
+                    showAlert("파일 열람 중 오류가 발생했습니다.");
+                }
+            };
+
             const handleTransaction = async (type, date, items, description, attachedFiles = []) => {
                 const newTransId = Date.now().toString();
                 const transactionRecord = { id: newTransId, date, type, items, description, timestamp: new Date().toISOString() };
@@ -282,7 +328,6 @@
                     const batch = db.batch();
                     const tRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`transactions_${selectedYear}`).doc(newTransId);
                     
-                    // 파일 Base64 데이터를 별도의 컬렉션에 분리 저장하여 장부 용량 최적화
                     if (attachedFiles && attachedFiles.length > 0) {
                         attachedFiles.forEach(file => {
                             const fRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(file.id);
@@ -459,7 +504,6 @@
                             });
                         }
 
-                        // 트랜잭션 삭제 시 연결된 파일(DB)도 함께 청소
                         if (transToDelete.attachedFiles && transToDelete.attachedFiles.length > 0) {
                             transToDelete.attachedFiles.forEach(file => {
                                 const fRef = db.collection('artifacts').doc(appId).collection('users').doc(user.uid).collection(`attachments_${selectedYear}`).doc(file.id);
@@ -527,7 +571,7 @@
                         ) : (
                             <>
                                 {activeTab === 'overview' && <OverviewTab budgets={budgets} onTransaction={handleTransaction} onBatchTransaction={handleBatchTransaction} onPrint={() => window.print()} showAlert={showAlert} showConfirm={showConfirm} />}
-                                {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={() => window.print()} onDelete={handleDeleteTransaction} onDownload={downloadAttachment} />}
+                                {activeTab === 'history' && <HistoryTab transactions={transactions} budgets={budgets} onPrint={() => window.print()} onDelete={handleDeleteTransaction} onDownload={downloadAttachment} onView={viewAttachment} />}
                                 {activeTab === 'chart' && <ChartTab transactions={transactions} year={selectedYear} />}
                             </>
                         )}
@@ -1044,7 +1088,7 @@
         // ==========================================
         // Tab 2: History & Detail Modal
         // ==========================================
-        const HistoryTab = ({ transactions, budgets, onPrint, onDelete, onDownload }) => {
+        const HistoryTab = ({ transactions, budgets, onPrint, onDelete, onDownload, onView }) => {
             const [searchTerm, setSearchTerm] = React.useState('');
             const [filterType, setFilterType] = React.useState('all');
             const [sortOrder, setSortOrder] = React.useState('desc');
@@ -1216,15 +1260,20 @@
                                     {(!selectedTx.attachedFiles || selectedTx.attachedFiles.length === 0) ? (
                                         <p className="text-gray-500 text-sm p-3"><i className="fa-solid fa-circle-exclamation mr-1"></i>첨부된 파일이 없습니다.</p>
                                     ) : (
-                                        <div className="grid grid-cols-2 gap-3">
+                                        <div className="flex flex-col space-y-2">
                                             {selectedTx.attachedFiles.map((file, idx) => (
-                                                <button key={idx} onClick={() => onDownload(file.id, file.name)} className="flex items-center p-3 border rounded hover:bg-gray-50 hover:border-blue-400 transition-colors group text-left w-full">
-                                                    <i className="fa-solid fa-file-pdf text-red-500 text-2xl mr-3"></i>
-                                                    <div className="overflow-hidden">
-                                                        <p className="text-sm font-bold text-gray-800 truncate group-hover:text-blue-600">{file.name}</p>
-                                                        <p className="text-xs text-gray-400 mt-1">클릭하여 다운로드</p>
+                                                <div key={idx} className="flex items-center justify-between p-3 border rounded hover:bg-gray-50 hover:border-blue-400 transition-colors w-full">
+                                                    <div className="flex items-center overflow-hidden flex-1">
+                                                        <i className="fa-solid fa-file-pdf text-red-500 text-2xl mr-3"></i>
+                                                        <div className="overflow-hidden">
+                                                            <p className="text-sm font-bold text-gray-800 truncate">{file.name}</p>
+                                                        </div>
                                                     </div>
-                                                </button>
+                                                    <div className="flex space-x-2 ml-2">
+                                                        <button onClick={() => onView(file.id, file.name)} className="px-3 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded text-xs font-bold" title="새 창에서 열람">열람</button>
+                                                        <button onClick={() => onDownload(file.id, file.name)} className="px-3 py-1.5 bg-gray-200 text-gray-700 hover:bg-gray-300 rounded text-xs font-bold" title="다운로드">다운로드</button>
+                                                    </div>
+                                                </div>
                                             ))}
                                         </div>
                                     )}
