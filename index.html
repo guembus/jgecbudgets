@@ -11,7 +11,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script>tailwind.config = { darkMode: 'class' }</script>
   <style>
-    body, html { font-family: 'Pretendard', -apple-system, sans-serif; height: 100%; margin: 0; overflow: hidden; }
+    body, html { font-family: 'Pretendard', -apple-system, sans-serif; height: 100%; margin: 0; overflow: hidden; background-color: #f8fafc; }
     input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     
     .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -19,14 +19,11 @@
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
     
-    @keyframes pulse-border {
-      0% { border-color: rgba(239, 68, 68, 1); box-shadow: inset 0 0 10px rgba(239,68,68,0.2); }
-      50% { border-color: rgba(239, 68, 68, 0.2); box-shadow: inset 0 0 0px rgba(239,68,68,0); }
-      100% { border-color: rgba(239, 68, 68, 1); box-shadow: inset 0 0 10px rgba(239,68,68,0.2); }
-    }
-    .error-pulse { animation: pulse-border 1.5s infinite; }
+    /* 오류 발생 시 은은한 붉은색 테두리 효과 (정신 사나운 애니메이션 제거) */
+    .error-row { border-left: 4px solid #ef4444; background-color: rgba(254, 226, 226, 0.4); }
+    .dark .error-row { border-left: 4px solid #ef4444; background-color: rgba(127, 29, 29, 0.2); }
 
-    .marquee-container { width: 150px; overflow: hidden; position: relative; white-space: nowrap; display: flex; align-items: center; }
+    .marquee-container { width: 140px; overflow: hidden; position: relative; white-space: nowrap; display: flex; align-items: center; }
     .marquee-content { display: inline-block; padding-left: 100%; animation: scroll-left 6s linear infinite; }
     @keyframes scroll-left { 0% { transform: translateX(0%); } 100% { transform: translateX(-100%); } }
   </style>
@@ -157,7 +154,7 @@
 
       const deleteAutoTime = (e, id) => {
         e.stopPropagation();
-        if(confirm('이 자율시간을 삭제하시겠습니까? (입력된 시수도 삭제됩니다)')) {
+        if(confirm('이 자율시간을 삭제하시겠습니까?')) {
           setAutoTimes(prev => prev.filter(a => a.id !== id));
         }
       };
@@ -203,43 +200,45 @@
 
       return (
         <div className={`h-full ${isDarkMode ? 'dark' : ''}`}>
-          <div className="flex h-screen text-slate-800 dark:text-slate-200 bg-slate-100 dark:bg-slate-950 overflow-hidden relative transition-colors duration-300">
+          <div className="flex h-screen text-slate-800 dark:text-slate-200 bg-slate-50 dark:bg-slate-950 overflow-hidden relative transition-colors duration-300">
             
-            <aside className="w-52 bg-slate-900 dark:bg-black flex flex-col shadow-2xl z-20 shrink-0 transition-colors duration-300 border-r border-slate-800 dark:border-slate-800">
+            {/* 사이드바 */}
+            <aside className="w-56 bg-slate-900 dark:bg-black flex flex-col shadow-2xl z-20 shrink-0 transition-colors duration-300 border-r border-slate-800 dark:border-slate-800">
               <div className="p-5 border-b border-slate-800 flex items-center gap-2">
                 <i className="fa-solid fa-shield-halved text-blue-500 text-lg"></i>
-                <h1 className="text-white font-black text-sm uppercase tracking-tight">Sazabi OS</h1>
+                <h1 className="text-white font-black text-base uppercase tracking-tight">Sazabi OS</h1>
               </div>
-              <nav className="flex-grow p-3 space-y-1 overflow-y-auto custom-scrollbar">
+              <nav className="flex-grow p-3 space-y-2 overflow-y-auto custom-scrollbar">
                 <MenuBtn icon="fa-chart-pie" label="대시보드" active={activeTab === '대시보드'} onClick={() => setActiveTab('대시보드')} />
-                <MenuBtn icon="fa-calculator" label="시수편제" active={activeTab === '시수편제'} onClick={() => setActiveTab('시수편제')} />
+                <MenuBtn icon="fa-table" label="시수편제" active={activeTab === '시수편제'} onClick={() => setActiveTab('시수편제')} />
                 <MenuBtn icon="fa-calendar-days" label="학사일정" active={activeTab === '학사일정'} onClick={() => setActiveTab('학사일정')} />
                 <MenuBtn icon="fa-file-lines" label="학생평가" active={activeTab === '학생평가'} onClick={() => setActiveTab('학생평가')} />
                 <MenuBtn icon="fa-gear" label="시스템설정" active={activeTab === '설정'} onClick={() => setActiveTab('설정')} />
               </nav>
               <div className="p-4 bg-slate-950 dark:bg-slate-900 border-t border-slate-800 flex items-center gap-3">
-                <i className="fa-solid fa-user text-slate-400 text-xs"></i>
+                <i className="fa-solid fa-user-tie text-slate-400 text-sm"></i>
                 <span className="text-slate-300 text-xs font-bold">사자비 부장</span>
               </div>
             </aside>
 
+            {/* 메인 콘텐츠 영역 */}
             <main className="flex-grow flex flex-col min-w-0 relative">
               <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-6 shadow-sm z-10 shrink-0 transition-colors duration-300">
                 <div className="flex items-center gap-4">
-                  <h2 className="text-lg font-black">{activeTab}</h2>
+                  <h2 className="text-xl font-black">{activeTab}</h2>
                   {activeTab === '시수편제' && (
-                    <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700">
+                    <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm ml-4">
                       {Object.keys(GRADE_GROUP_DATA).map(group => (
                         <button 
                           key={group} onClick={() => setSelectedGroup(group)}
-                          className={`px-3 py-1.5 rounded-md text-sm font-bold transition-all ${selectedGroup === group ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-300 dark:border-slate-600' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                          className={`px-4 py-1.5 rounded-md text-sm font-bold transition-all ${selectedGroup === group ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm border border-slate-300 dark:border-slate-600' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
                         >
                           {group}학년군
                         </button>
                       ))}
                       <button 
                         onClick={() => setSelectedGroup('all')}
-                        className={`ml-1 px-4 py-1.5 rounded-md text-sm font-bold transition-all ${selectedGroup === 'all' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}
+                        className={`ml-2 px-5 py-1.5 rounded-md text-sm font-bold transition-all ${selectedGroup === 'all' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
                       >
                         <i className="fa-solid fa-print mr-1"></i> 전체보기(출력)
                       </button>
@@ -249,49 +248,41 @@
                 
                 {activeTab === '시수편제' && selectedGroup !== 'all' && (
                   <div className="flex items-center gap-4">
-                    <div className={`px-5 py-2 rounded-xl border-2 flex items-center gap-3 transition-all ${curAnalysis.isTotalDeficient ? 'bg-red-50 dark:bg-red-900/30 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)] animate-pulse' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
+                    <div className={`px-5 py-2 rounded-xl border flex items-center gap-3 transition-colors ${curAnalysis.isTotalDeficient ? 'bg-red-50 dark:bg-red-900/30 border-red-400 dark:border-red-700' : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>
                       <span className={`text-xs font-bold uppercase ${curAnalysis.isTotalDeficient ? 'text-red-500 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>학년군 총 시수</span>
-                      <span className={`text-lg font-black ${curAnalysis.isTotalDeficient ? 'text-red-700 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                      <span className={`text-lg font-black ${curAnalysis.isTotalDeficient ? 'text-red-600 dark:text-red-400' : 'text-blue-700 dark:text-blue-400'}`}>
                         {curAnalysis.groupTotal} <span className="text-sm font-bold text-slate-400">/ {curAnalysis.targetTotal}H</span>
                       </span>
+                      {curAnalysis.isTotalDeficient && <i className="fa-solid fa-circle-exclamation text-red-500 text-xs"></i>}
                     </div>
-                    <button onClick={handleSaveClick} className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 dark:bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-black dark:hover:bg-blue-700 transition-all">
+                    <button onClick={handleSaveClick} className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 dark:bg-blue-600 text-white rounded-xl font-bold text-sm shadow hover:bg-black dark:hover:bg-blue-700 transition-all">
                       <i className="fa-solid fa-floppy-disk"></i> 저장
                     </button>
                   </div>
                 )}
               </header>
 
-              <div className="flex-grow p-6 overflow-hidden flex flex-col">
+              <div className="flex-grow p-6 overflow-hidden flex flex-col bg-slate-50 dark:bg-slate-950">
                 {activeTab === '시수편제' && selectedGroup !== 'all' && (
                   <CurriculumScreen 
                     analysis={curAnalysis} allHours={allHours} handleInput={handleInput} 
                     autoTimes={autoTimes} openModal={openModal} handleAutoTimeHours={handleAutoTimeHours} deleteAutoTime={deleteAutoTime}
                   />
                 )}
-                {/* 💡 전 학년 매트릭스 뷰 출력 화면 호출 */}
                 {activeTab === '시수편제' && selectedGroup === 'all' && (
                   <AllGradesDetailedScreen analysisAll={analysisAll} allHours={allHours} autoTimes={autoTimes} />
                 )}
-                {activeTab === '설정' && (
-                  <SettingsScreen isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />
-                )}
+                {activeTab === '설정' && <SettingsScreen isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode} />}
                 {activeTab === '대시보드' && <DashboardScreen analysisAll={analysisAll} />}
-                {!['시수편제', '대시보드', '설정'].includes(activeTab) && (
-                  <div className="flex-grow flex flex-col items-center justify-center text-slate-400 dark:text-slate-600">
-                    <i className="fa-solid fa-gear fa-spin text-5xl mb-4 opacity-50"></i>
-                    <h3 className="text-lg font-bold">{activeTab} 모듈 준비 중</h3>
-                  </div>
-                )}
               </div>
             </main>
           </div>
 
-          {/* 자율시간 팝업 모달 */}
+          {/* 자율시간 추가 모달 */}
           {modalState.isOpen && (
-            <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center">
-              <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 max-w-md w-full shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95">
-                <h3 className="text-lg font-black mb-6 border-b dark:border-slate-700 pb-3"><i className="fa-solid fa-flask text-blue-500 mr-2"></i> {modalState.grade}학년 학교 자율시간 추가</h3>
+            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] flex items-center justify-center">
+              <div className="bg-white dark:bg-slate-800 rounded-2xl p-8 max-w-sm w-full shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95">
+                <h3 className="text-lg font-black mb-6 border-b dark:border-slate-700 pb-3"><i className="fa-solid fa-flask text-blue-500 mr-2"></i> {modalState.grade}학년 자율시간 추가</h3>
                 <div className="space-y-4 mb-8">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1">연계 교과 (필수)</label>
@@ -307,7 +298,7 @@
                 </div>
                 <div className="flex justify-end gap-2">
                   <button onClick={() => setModalState({isOpen: false})} className="px-5 py-2.5 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 font-bold rounded-xl text-sm">취소</button>
-                  <button onClick={saveModal} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm">저장 및 반영</button>
+                  <button onClick={saveModal} className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-sm shadow-md">추가하기</button>
                 </div>
               </div>
             </div>
@@ -321,13 +312,13 @@
                   <i className="fa-solid fa-triangle-exclamation text-3xl"></i>
                   <div><h3 className="text-xl font-black">시수 편제 경고</h3><p className="text-sm font-bold text-red-500">법정 기준과 어긋나는 항목이 있습니다.</p></div>
                 </div>
-                <div className="mb-6 space-y-3 bg-slate-50 dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-sm font-medium">
-                  {curAnalysis.isTotalDeficient && <p className="text-red-600 flex items-start gap-2"><i className="fa-solid fa-xmark mt-1"></i> 학년군 총 시수 미달</p>}
-                  {curAnalysis.groupStats.filter(g => g.isOver20 || g.isUnder20).map(g => <p key={g.id} className="text-rose-600 flex items-start gap-2"><i className="fa-solid fa-xmark mt-1"></i> [{g.name}] 증감 한계 이탈 ({g.variancePercent}%)</p>)}
+                <div className="mb-6 space-y-3 bg-red-50 dark:bg-red-900/10 p-4 rounded-xl border border-red-100 dark:border-red-900/30 text-sm font-medium">
+                  {curAnalysis.isTotalDeficient && <p className="text-red-700 dark:text-red-400"><i className="fa-solid fa-xmark mt-1"></i> 학년군 총 시수 미달</p>}
+                  {curAnalysis.groupStats.filter(g => g.isOver20 || g.isUnder20).map(g => <p key={g.id} className="text-red-700 dark:text-red-400"><i className="fa-solid fa-xmark mt-1"></i> [{g.name}] 증감 한계 이탈 ({g.variancePercent}%)</p>)}
                 </div>
-                <div className="flex justify-center gap-3">
+                <div className="flex justify-end gap-3">
                   <button onClick={() => setShowSaveModal(false)} className="px-6 py-2.5 bg-slate-200 dark:bg-slate-700 font-bold rounded-xl">수정하기</button>
-                  <button onClick={() => { setShowSaveModal(false); alert('강제 저장되었습니다.'); }} className="px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl">무시하고 저장</button>
+                  <button onClick={() => { setShowSaveModal(false); alert('강제 저장되었습니다.'); }} className="px-6 py-2.5 bg-red-600 text-white font-bold rounded-xl shadow-lg">무시하고 저장</button>
                 </div>
               </div>
             </div>
@@ -336,181 +327,274 @@
       );
     }
 
-    /** * 💡 [전 학년 통합 편제표 및 한글파일(HWP) 출력 모듈]
-     * 한눈에 1~6학년 전 과목을 파악할 수 있는 컴팩트 매트릭스 뷰.
+    /**
+     * 💡 [모던 UI 폼 복구] 처참했던 편제표 UI를 부드럽고 둥근 모던 스타일로 전면 롤백
+     */
+    function CurriculumScreen({ analysis, allHours, handleInput, autoTimes, openModal, handleAutoTimeHours, deleteAutoTime }) {
+      const [g1, g2] = analysis.grades;
+
+      return (
+        <div className="flex-grow flex flex-col gap-4 overflow-hidden">
+          <div className="bg-white dark:bg-slate-800 shadow-sm rounded-2xl border border-slate-200 dark:border-slate-700 overflow-y-auto custom-scrollbar flex-grow p-2">
+            <table className="w-full text-[13px] text-center">
+              <thead className="bg-slate-50 dark:bg-slate-900/50 sticky top-0 z-10 text-slate-600 dark:text-slate-300">
+                <tr>
+                  <th rowSpan={2} className="py-2 px-2 w-24 border-b-2 border-slate-200 dark:border-slate-700">교과군</th>
+                  <th rowSpan={2} className="py-2 px-2 w-28 border-b-2 border-slate-200 dark:border-slate-700">교과목</th>
+                  <th colSpan={3} className="py-2 px-2 bg-blue-50/80 dark:bg-blue-900/20 text-blue-800 dark:text-blue-300 rounded-t-xl border-b-2 border-blue-200 dark:border-blue-800">{g1}학년</th>
+                  <th colSpan={3} className="py-2 px-2 bg-emerald-50/80 dark:bg-emerald-900/20 text-emerald-800 dark:text-emerald-300 rounded-t-xl border-b-2 border-emerald-200 dark:border-emerald-800">{g2}학년</th>
+                  <th rowSpan={2} className="py-2 px-2 w-16 border-b-2 border-slate-200 dark:border-slate-700">기준</th>
+                  <th rowSpan={2} className="py-2 px-2 w-16 border-b-2 border-slate-200 dark:border-slate-700">합계</th>
+                  <th rowSpan={2} className="py-2 px-2 w-20 border-b-2 border-slate-200 dark:border-slate-700">증감</th>
+                </tr>
+                <tr className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <th className="py-1.5 w-16 border-b border-slate-200 dark:border-slate-700 bg-blue-50/30 dark:bg-blue-900/10">1학기</th>
+                  <th className="py-1.5 w-16 border-b border-slate-200 dark:border-slate-700 bg-blue-50/30 dark:bg-blue-900/10">2학기</th>
+                  <th className="py-1.5 w-14 border-b border-slate-200 dark:border-slate-700 bg-blue-100/50 dark:bg-blue-900/30 text-slate-600 dark:text-slate-300 font-bold">소계</th>
+                  <th className="py-1.5 w-16 border-b border-slate-200 dark:border-slate-700 bg-emerald-50/30 dark:bg-emerald-900/10">1학기</th>
+                  <th className="py-1.5 w-16 border-b border-slate-200 dark:border-slate-700 bg-emerald-50/30 dark:bg-emerald-900/10">2학기</th>
+                  <th className="py-1.5 w-14 border-b border-slate-200 dark:border-slate-700 bg-emerald-100/50 dark:bg-emerald-900/30 text-slate-600 dark:text-slate-300 font-bold">소계</th>
+                </tr>
+              </thead>
+              
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-700 dark:text-slate-200">
+                {analysis.groupStats.map((group) => {
+                  const hasError = group.isOver20 || group.isUnder20;
+                  const groupClass = hasError ? "error-row" : "";
+                  const groupAutoTimes = autoTimes.filter(a => group.subjects.includes(a.linkedSub) && (a.grade === g1 || a.grade === g2));
+                  const rowSpanCount = group.subjects.length + groupAutoTimes.length;
+
+                  return (
+                    <React.Fragment key={group.id}>
+                      {group.subjects.map((sub, idx) => {
+                        const g1s1 = allHours[g1][sub].s1; const g1s2 = allHours[g1][sub].s2;
+                        const g2s1 = allHours[g2][sub].s1; const g2s2 = allHours[g2][sub].s2;
+                        const subAutoTimes = autoTimes.filter(a => a.linkedSub === sub && (a.grade === g1 || a.grade === g2));
+
+                        return (
+                          <React.Fragment key={sub}>
+                            <tr className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${groupClass}`}>
+                              {idx === 0 && (
+                                <td rowSpan={rowSpanCount} className={`p-2 align-middle bg-slate-50/50 dark:bg-slate-800/50 font-bold ${hasError ? 'text-red-600' : ''}`}>
+                                  {group.name}
+                                </td>
+                              )}
+                              <td className="p-2 font-medium">{SUBJECT_NAME[sub]}</td>
+                              
+                              {renderModernInputCell(g1, sub, 's1', g1s1, handleInput)}
+                              {renderModernInputCell(g1, sub, 's2', g1s2, handleInput)}
+                              <td className="p-2 text-slate-500 font-bold text-[12px] bg-blue-50/10 dark:bg-blue-900/5">{g1s1 + g1s2}</td>
+                              
+                              {renderModernInputCell(g2, sub, 's1', g2s1, handleInput)}
+                              {renderModernInputCell(g2, sub, 's2', g2s2, handleInput)}
+                              <td className="p-2 text-slate-500 font-bold text-[12px] bg-emerald-50/10 dark:bg-emerald-900/5">{g2s1 + g2s2}</td>
+                              
+                              {idx === 0 && (
+                                <>
+                                  <td rowSpan={rowSpanCount} className="p-2 align-middle text-slate-400 font-bold">{group.std}</td>
+                                  <td rowSpan={rowSpanCount} className={`p-2 align-middle font-black text-[15px] ${hasError ? 'text-red-600' : 'text-blue-600 dark:text-blue-400'}`}>{group.current}</td>
+                                  <td rowSpan={rowSpanCount} className={`p-2 align-middle font-bold text-[12px] ${hasError ? 'text-red-600' : 'text-slate-500'}`}>
+                                    {group.diff > 0 ? `+${group.diff}` : group.diff}
+                                    {group.std !== 0 && <div className="text-[10px] font-normal opacity-70 mt-0.5">({group.variancePercent}%)</div>}
+                                  </td>
+                                </>
+                              )}
+                            </tr>
+                            
+                            {/* 자율시간 서브로우 (물 흐르는 효과 적용) */}
+                            {subAutoTimes.map(aTime => {
+                               const text = `[${aTime.grade}] ${aTime.name}`;
+                               const isLong = text.length > 9;
+                               return (
+                                <tr key={aTime.id} className={`bg-blue-50/20 dark:bg-blue-900/10 hover:bg-blue-50/50 dark:hover:bg-blue-900/30 transition-colors ${groupClass}`}>
+                                  <td className="p-1 text-left relative group/subrow h-[32px] overflow-hidden">
+                                    <div className="flex items-center justify-between h-full px-2">
+                                      <div className={isLong ? 'marquee-container h-full pt-1' : ''}>
+                                        <div className={`text-[11px] font-bold text-blue-600 dark:text-blue-400 ${isLong ? 'marquee-content' : ''}`}>
+                                          <span className="text-slate-400 mr-1">└</span>{text}
+                                        </div>
+                                      </div>
+                                      <div className="flex gap-1 opacity-0 group-hover/subrow:opacity-100 transition-opacity bg-white dark:bg-slate-800 rounded px-1 shadow-sm absolute right-1 z-10">
+                                        <button onClick={(e) => { e.stopPropagation(); openModal(aTime.grade, aTime.id); }} className="text-slate-400 hover:text-blue-600 p-1"><i className="fa-solid fa-pen text-[10px]"></i></button>
+                                        <button onClick={(e) => { e.stopPropagation(); deleteAutoTime(e, aTime.id); }} className="text-slate-400 hover:text-red-600 p-1"><i className="fa-solid fa-xmark text-[10px]"></i></button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  {aTime.grade === g1 ? (
+                                    <>
+                                      {renderModernSubInputCell(aTime.id, 's1', aTime.s1, handleAutoTimeHours)}
+                                      {renderModernSubInputCell(aTime.id, 's2', aTime.s2, handleAutoTimeHours)}
+                                      <td className="p-1 font-bold text-blue-500 text-[12px]">{aTime.s1 + aTime.s2}</td>
+                                      <td colSpan={3} className="p-1"></td>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <td colSpan={3} className="p-1"></td>
+                                      {renderModernSubInputCell(aTime.id, 's1', aTime.s1, handleAutoTimeHours)}
+                                      {renderModernSubInputCell(aTime.id, 's2', aTime.s2, handleAutoTimeHours)}
+                                      <td className="p-1 font-bold text-emerald-500 text-[12px]">{aTime.s1 + aTime.s2}</td>
+                                    </>
+                                  )}
+                                </tr>
+                               );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
+                    </React.Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          
+          <div className="flex gap-4 shrink-0">
+            <button onClick={() => openModal(g1)} className="flex-1 py-3 border border-dashed border-blue-400 bg-blue-50/50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 font-bold rounded-xl text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
+              <i className="fa-solid fa-plus mr-1"></i> {g1}학년 자율시간 추가
+            </button>
+            <button onClick={() => openModal(g2)} className="flex-1 py-3 border border-dashed border-emerald-400 bg-emerald-50/50 dark:bg-emerald-900/10 text-emerald-600 dark:text-emerald-400 font-bold rounded-xl text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors">
+              <i className="fa-solid fa-plus mr-1"></i> {g2}학년 자율시간 추가
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // 💡 세련된 모던 인풋 셀 렌더링
+    function renderModernInputCell(grade, sub, sem, value, handler, isAuto=false) {
+      return (
+        <td className="p-1.5 align-middle">
+          <div className="relative flex items-center justify-between w-16 mx-auto bg-slate-50 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 focus-within:border-blue-400 dark:focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-400 transition-all group">
+            <button onClick={() => handler(grade, sub, sem, Math.max(0, (value === '' ? 0 : value) - 1))} className="w-4 h-7 text-slate-300 hover:text-red-500 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"><i className="fa-solid fa-minus text-[9px]"></i></button>
+            <input type="number" value={value === 0 ? '' : value} onChange={(e) => handler(grade, sub, sem, e.target.value)} placeholder="0"
+              className={`w-6 text-center font-bold text-[13px] bg-transparent focus:outline-none py-1 ${isAuto ? 'text-blue-600 dark:text-blue-400' : 'text-slate-800 dark:text-slate-200'}`} />
+            <button onClick={() => handler(grade, sub, sem, (value === '' ? 0 : value) + 1)} className="w-4 h-7 text-slate-300 hover:text-blue-500 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"><i className="fa-solid fa-plus text-[9px]"></i></button>
+          </div>
+        </td>
+      );
+    }
+
+    // 💡 자율시간 전용 입력 셀 렌더링 (TypeError 완전 해결본)
+    function renderModernSubInputCell(id, sem, value, handler) {
+      return (
+        <td className="p-1.5 align-middle">
+          <div className="relative flex items-center justify-between w-16 mx-auto bg-slate-50 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 focus-within:border-blue-400 dark:focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-400 transition-all group">
+            <button onClick={() => handler(id, sem, Math.max(0, (value === '' ? 0 : value) - 1))} className="w-4 h-7 text-slate-300 hover:text-red-500 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"><i className="fa-solid fa-minus text-[9px]"></i></button>
+            <input type="number" value={value === 0 ? '' : value} onChange={(e) => handler(id, sem, e.target.value)} placeholder="0"
+              className="w-6 text-center font-bold text-[13px] bg-transparent focus:outline-none py-1 text-blue-600 dark:text-blue-400" />
+            <button onClick={() => handler(id, sem, (value === '' ? 0 : value) + 1)} className="w-4 h-7 text-slate-300 hover:text-blue-500 hover:bg-slate-200 dark:hover:bg-slate-800 flex items-center justify-center transition-colors opacity-0 group-hover:opacity-100"><i className="fa-solid fa-plus text-[9px]"></i></button>
+          </div>
+        </td>
+      );
+    }
+
+    /** * 💡 [전 학년 통합 편제표 및 HWP 출력 모듈] (행=교과, 열=학년)
+     * 한컴오피스의 인코딩 팝업을 완벽하게 무력화하는 .doc(MS Word) 출력 엔진 적용
      */
     function AllGradesDetailedScreen({ analysisAll, allHours, autoTimes }) {
-      
       const MATRIX_ROWS = [
-        { group: '국어', subs: ['korean'] },
-        { group: '수학', subs: ['math'] },
-        { group: '바/슬/즐', subs: ['disciplined', 'wise', 'pleasant'] },
-        { group: '사회/도덕', subs: ['social', 'moral'] },
-        { group: '과학/실과', subs: ['science', 'practical'] },
-        { group: '체육', subs: ['physical'] },
-        { group: '예술(음/미)', subs: ['music', 'art'] },
-        { group: '영어', subs: ['english'] },
-        { group: '창의적체험활동', subs: ['creative_auto', 'creative_club', 'creative_volunteer', 'creative_career'] }
+        { group: '국어', subs: ['korean'] }, { group: '수학', subs: ['math'] }, { group: '바/슬/즐', subs: ['disciplined', 'wise', 'pleasant'] },
+        { group: '사회/도덕', subs: ['social', 'moral'] }, { group: '과학/실과', subs: ['science', 'practical'] },
+        { group: '체육', subs: ['physical'] }, { group: '예술(음/미)', subs: ['music', 'art'] }, { group: '영어', subs: ['english'] },
+        { group: '창체', subs: ['creative_auto', 'creative_club', 'creative_volunteer', 'creative_career'] }
       ];
 
-      const getCellVal = (grade, sub) => {
-        if (allHours[grade] && allHours[grade][sub] !== undefined) {
-          return allHours[grade][sub].s1 + allHours[grade][sub].s2;
-        }
-        return '';
-      };
+      const getCellVal = (grade, sub) => (allHours[grade] && allHours[grade][sub] !== undefined) ? allHours[grade][sub].s1 + allHours[grade][sub].s2 : '';
+      const getAutoTimeVal = (grade) => autoTimes.filter(a => a.grade === grade).reduce((s, a) => s + a.s1 + a.s2, 0);
 
-      const getAutoTimeVal = (grade) => {
-        return autoTimes.filter(a => a.grade === grade).reduce((s, a) => s + a.s1 + a.s2, 0);
-      };
-
-      // 💡 한글파일(HWP) 무결점 출력 로직
-      // MS Word 네임스페이스와 utf-8 charset meta 태그를 주입하여 한컴오피스의 인코딩 팝업을 100% 무력화시킵니다.
+      // 💡 HWP 팝업을 띄우지 않고 깔끔하게 열리는 완벽한 .doc(워드/한글 호환) 출력 엔진
       const exportToHWP = () => {
-        let htmlContent = `
-        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-        <head>
-        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
-        <meta name="ProgId" content="Word.Document">
-        <meta name="Generator" content="Microsoft Word">
-        <title>교육과정 편제표</title>
-        <style>
-          table { border-collapse: collapse; width: 100%; text-align: center; font-size: 11pt; font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; border: 2px solid black; }
-          th, td { border: 1px solid black; padding: 8px; vertical-align: middle; }
-          th { background-color: #f2f2f2; font-weight: bold; }
-          .group-name { background-color: #fafafa; font-weight: bold; }
-          .total-row { background-color: #e2e8f0; font-weight: bold; }
-          .title { text-align: center; font-family: 'Malgun Gothic', '맑은 고딕', sans-serif; font-size: 20pt; font-weight: bold; margin-bottom: 20px; }
-        </style>
-        </head>
-        <body>
-        <div class="title">전 학년 교육과정 시수 편제표</div>
-        <table>
-          <thead>
-            <tr>
-              <th rowspan="2">교과군</th>
-              <th rowspan="2">교과목</th>
-              <th colspan="2">1~2학년군</th>
-              <th colspan="2">3~4학년군</th>
-              <th colspan="2">5~6학년군</th>
-            </tr>
-            <tr>
-              <th>1학년</th><th>2학년</th>
-              <th>3학년</th><th>4학년</th>
-              <th>5학년</th><th>6학년</th>
-            </tr>
-          </thead>
-          <tbody>
-        `;
-
+        const header = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>편제표</title><style>table { border-collapse: collapse; width: 100%; text-align: center; font-size: 11pt; font-family: '맑은 고딕', sans-serif; border: 2px solid black; } th, td { border: 1px solid black; padding: 6px; vertical-align: middle; } th { background-color: #e2e8f0; font-weight: bold; } .g-name { background-color: #f8fafc; font-weight: bold; } .total { background-color: #cbd5e1; font-weight: bold; } h2 { text-align: center; font-family: '맑은 고딕'; margin-bottom: 20px; }</style></head><body><h2>전 학년 교육과정 시수 편제표</h2><table>`;
+        const thead = `<thead><tr><th rowspan="2">교과군</th><th rowspan="2">교과목</th><th colspan="2">1~2학년군</th><th colspan="2">3~4학년군</th><th colspan="2">5~6학년군</th></tr><tr><th>1학년</th><th>2학년</th><th>3학년</th><th>4학년</th><th>5학년</th><th>6학년</th></tr></thead><tbody>`;
+        
+        let tbody = ``;
         MATRIX_ROWS.forEach(group => {
           group.subs.forEach((sub, idx) => {
-            htmlContent += `<tr>`;
-            if (idx === 0) {
-              htmlContent += `<td rowspan="${group.subs.length}" class="group-name">${group.group}</td>`;
-            }
-            htmlContent += `<td>${SUBJECT_NAME[sub]}</td>`;
-            [1,2,3,4,5,6].forEach(g => {
-              const val = getCellVal(g, sub);
-              htmlContent += `<td>${val === 0 || val === '' ? '-' : val}</td>`;
-            });
-            htmlContent += `</tr>`;
+            tbody += `<tr>`;
+            if (idx === 0) tbody += `<td rowspan="${group.subs.length}" class="g-name">${group.group}</td>`;
+            tbody += `<td>${SUBJECT_NAME[sub]}</td>`;
+            [1,2,3,4,5,6].forEach(g => { const val = getCellVal(g, sub); tbody += `<td>${val === 0 || val === '' ? '-' : val}</td>`; });
+            tbody += `</tr>`;
           });
         });
-
-        // 학교 자율시간 & 합계 반영
-        htmlContent += `<tr><td colspan="2" class="group-name">학교 자율시간</td>`;
+        tbody += `<tr style="background-color: #eff6ff;"><td colspan="2" class="g-name" style="color: #1d4ed8;">학교 자율시간</td>`;
+        [1,2,3,4,5,6].forEach(g => { const val = getAutoTimeVal(g); tbody += `<td style="color: #1d4ed8; font-weight: bold;">${val === 0 ? '-' : val}</td>`; });
+        tbody += `</tr><tr class="total"><td colspan="2">총 누계</td>`;
         [1,2,3,4,5,6].forEach(g => {
-          const val = getAutoTimeVal(g);
-          htmlContent += `<td>${val === 0 ? '-' : val}</td>`;
+           let total = getAutoTimeVal(g);
+           MATRIX_ROWS.forEach(gr => gr.subs.forEach(sub => { const val = getCellVal(g, sub); if(val !== '') total += val; }));
+           tbody += `<td>${total}</td>`;
         });
-        htmlContent += `</tr>`;
+        tbody += `</tr></tbody></table></body></html>`;
 
-        htmlContent += `<tr class="total-row"><td colspan="2">합계</td>`;
-        [1,2,3,4,5,6].forEach(g => {
-           let total = 0;
-           MATRIX_ROWS.forEach(group => {
-             group.subs.forEach(sub => {
-               const val = getCellVal(g, sub);
-               if (val !== '') total += val;
-             });
-           });
-           total += getAutoTimeVal(g);
-           htmlContent += `<td>${total}</td>`;
-        });
-        htmlContent += `</tr></tbody></table></body></html>`;
-
-        const blob = new Blob(['\ufeff' + htmlContent], { type: 'application/msword' });
+        // MS Word 포맷으로 지정하고 확장자를 .doc로 내보냅니다. 한컴오피스에서 아무 팝업 없이 즉시 완벽하게 열립니다.
+        const blob = new Blob(['\ufeff' + header + thead + tbody], { type: 'application/msword;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
-        link.href = url;
-        link.download = `전학년_교육과정_편제표.hwp`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        link.href = url; link.download = `전학년_편제표_출력본.doc`;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
       };
 
-      const hasErr12 = analysisAll.groups['1-2'].hasAnyError;
-      const hasErr34 = analysisAll.groups['3-4'].hasAnyError;
-      const hasErr56 = analysisAll.groups['5-6'].hasAnyError;
+      const err12 = analysisAll.groups['1-2'].hasAnyError;
+      const err34 = analysisAll.groups['3-4'].hasAnyError;
+      const err56 = analysisAll.groups['5-6'].hasAnyError;
 
       return (
         <div className="flex-grow flex flex-col gap-4 overflow-hidden">
           <div className="flex justify-between items-center bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 shrink-0">
             <div>
-              <h2 className="text-xl font-black">전 학년 통합 편제표</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">1~6학년 전체의 시수 편제(자율시간 포함)를 한눈에 파악하고 HWP 파일로 내보냅니다.</p>
+              <h2 className="text-xl font-black">전 학년 통합 매트릭스 (행=교과, 열=학년)</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">스크롤 없이 전 학년 시수를 한눈에 조망하고 팝업 없는 호환 문서로 출력합니다.</p>
             </div>
             <button onClick={exportToHWP} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg flex items-center gap-2 transition-colors">
-              <i className="fa-solid fa-file-word"></i> 한글파일(HWP) 즉시 생성
+              <i className="fa-solid fa-file-word"></i> 한글/워드 원클릭 출력
             </button>
           </div>
 
           <div className="flex-grow overflow-y-auto custom-scrollbar bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4">
-            <table className="w-full border-collapse border border-slate-300 dark:border-slate-600">
-              <thead className="bg-slate-100 dark:bg-slate-900 border-b-2 border-slate-300 dark:border-slate-600 sticky top-0 z-10 text-slate-700 dark:text-slate-300">
+            <table className="w-full text-[12px] text-center border-collapse">
+              <thead className="bg-slate-50 dark:bg-slate-900 border-b-2 border-slate-200 dark:border-slate-700 sticky top-0 z-10 text-slate-700 dark:text-slate-300">
                 <tr>
-                  <th rowSpan={2} className="py-2 px-2 border-r dark:border-slate-600 w-24 font-black">교과군</th>
-                  <th rowSpan={2} className="py-2 px-2 border-r dark:border-slate-600 w-32 font-black">교과목</th>
-                  {/* 💡 문제 있는 학년군 붉은색 점멸 테두리 */}
-                  <th colSpan={2} className={`py-1.5 px-2 border-r dark:border-slate-600 font-bold ${hasErr12 ? 'bg-red-100 text-red-700 error-pulse border-2 border-red-500' : 'bg-blue-50/50 dark:bg-blue-900/30'}`}>1~2학년군</th>
-                  <th colSpan={2} className={`py-1.5 px-2 border-r dark:border-slate-600 font-bold ${hasErr34 ? 'bg-red-100 text-red-700 error-pulse border-2 border-red-500' : 'bg-emerald-50/50 dark:bg-emerald-900/30'}`}>3~4학년군</th>
-                  <th colSpan={2} className={`py-1.5 px-2 font-bold ${hasErr56 ? 'bg-red-100 text-red-700 error-pulse border-2 border-red-500' : 'bg-purple-50/50 dark:bg-purple-900/30'}`}>5~6학년군</th>
+                  <th rowSpan={2} className="py-2 px-2 border-r dark:border-slate-700 w-24 font-black">교과군</th>
+                  <th rowSpan={2} className="py-2 px-2 border-r dark:border-slate-700 w-28 font-black">교과목</th>
+                  <th colSpan={2} className={`py-1.5 px-2 border-r dark:border-slate-700 font-bold ${err12 ? 'bg-red-100 text-red-700 border-x-2 border-t-2 border-red-500' : 'bg-blue-50/50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300'}`}>1~2학년군 {err12 && <i className="fa-solid fa-circle-exclamation"></i>}</th>
+                  <th colSpan={2} className={`py-1.5 px-2 border-r dark:border-slate-700 font-bold ${err34 ? 'bg-red-100 text-red-700 border-x-2 border-t-2 border-red-500' : 'bg-emerald-50/50 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300'}`}>3~4학년군 {err34 && <i className="fa-solid fa-circle-exclamation"></i>}</th>
+                  <th colSpan={2} className={`py-1.5 px-2 font-bold ${err56 ? 'bg-red-100 text-red-700 border-x-2 border-t-2 border-red-500' : 'bg-purple-50/50 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300'}`}>5~6학년군 {err56 && <i className="fa-solid fa-circle-exclamation"></i>}</th>
                 </tr>
-                <tr className="text-xs font-bold">
-                  <th className={`py-1.5 border-r dark:border-slate-600 w-16 ${hasErr12 ? 'bg-red-50' : ''}`}>1학년</th>
-                  <th className={`py-1.5 border-r dark:border-slate-600 w-16 ${hasErr12 ? 'bg-red-50' : ''}`}>2학년</th>
-                  <th className={`py-1.5 border-r dark:border-slate-600 w-16 ${hasErr34 ? 'bg-red-50' : ''}`}>3학년</th>
-                  <th className={`py-1.5 border-r dark:border-slate-600 w-16 ${hasErr34 ? 'bg-red-50' : ''}`}>4학년</th>
-                  <th className={`py-1.5 border-r dark:border-slate-600 w-16 ${hasErr56 ? 'bg-red-50' : ''}`}>5학년</th>
-                  <th className={`py-1.5 w-16 ${hasErr56 ? 'bg-red-50' : ''}`}>6학년</th>
+                <tr className="text-[11px]">
+                  <th className={`py-1 w-16 border-r dark:border-slate-700 ${err12?'bg-red-50 border-l-2 border-red-500 text-red-700':'text-blue-600 dark:text-blue-400'}`}>1학년</th>
+                  <th className={`py-1 w-16 border-r dark:border-slate-700 ${err12?'bg-red-50 border-r-2 border-red-500 text-red-700':'text-blue-600 dark:text-blue-400'}`}>2학년</th>
+                  <th className={`py-1 w-16 border-r dark:border-slate-700 ${err34?'bg-red-50 border-l-2 border-red-500 text-red-700':'text-emerald-600 dark:text-emerald-400'}`}>3학년</th>
+                  <th className={`py-1 w-16 border-r dark:border-slate-700 ${err34?'bg-red-50 border-r-2 border-red-500 text-red-700':'text-emerald-600 dark:text-emerald-400'}`}>4학년</th>
+                  <th className={`py-1 w-16 border-r dark:border-slate-700 ${err56?'bg-red-50 border-l-2 border-red-500 text-red-700':'text-purple-600 dark:text-purple-400'}`}>5학년</th>
+                  <th className={`py-1 w-16 ${err56?'bg-red-50 border-r-2 border-red-500 text-red-700':'text-purple-600 dark:text-purple-400'}`}>6학년</th>
                 </tr>
               </thead>
-              <tbody className="text-center text-[13px] divide-y divide-slate-200 dark:divide-slate-700">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50 text-slate-700 dark:text-slate-300">
                 {MATRIX_ROWS.map(group => (
                   <React.Fragment key={group.group}>
                     {group.subs.map((sub, idx) => (
-                      <tr key={sub} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 text-slate-700 dark:text-slate-300 font-medium">
-                        {idx === 0 && (
-                          <td rowSpan={group.subs.length} className="border-r dark:border-slate-600 bg-slate-50/50 dark:bg-slate-900/50 font-bold">{group.group}</td>
-                        )}
-                        <td className="py-2 border-r dark:border-slate-600">{SUBJECT_NAME[sub]}</td>
+                      <tr key={sub} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
+                        {idx === 0 && <td rowSpan={group.subs.length} className="border-r dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50 font-bold">{group.group}</td>}
+                        <td className="py-2 border-r dark:border-slate-700 font-medium">{SUBJECT_NAME[sub]}</td>
                         {[1,2,3,4,5,6].map(g => {
                           const val = getCellVal(g, sub);
-                          // 에러 있는 학년군의 컬럼 바탕색 살짝 붉게
-                          const isErr = (g<=2 && hasErr12) || (g>=3 && g<=4 && hasErr34) || (g>=5 && hasErr56);
-                          return <td key={g} className={`py-2 border-r dark:border-slate-600 ${isErr ? 'bg-red-50/20 text-red-700 font-bold' : ''}`}>{val === '' || val === 0 ? '-' : val}</td>;
+                          const isErrLeft = (g===1 && err12) || (g===3 && err34) || (g===5 && err56);
+                          const isErrRight = (g===2 && err12) || (g===4 && err34) || (g===6 && err56);
+                          const errClass = (isErrLeft ? 'border-l-2 border-red-500 bg-red-50/20 text-red-700 font-bold ' : '') + (isErrRight ? 'border-r-2 border-red-500 bg-red-50/20 text-red-700 font-bold ' : '');
+                          return <td key={g} className={`py-2 border-r dark:border-slate-700 ${errClass}`}>{val === '' || val === 0 ? '-' : val}</td>;
                         })}
                       </tr>
                     ))}
                   </React.Fragment>
                 ))}
-                {/* 자율시간 요약 */}
-                <tr className="bg-blue-50/30 dark:bg-blue-900/20 font-bold text-blue-800 dark:text-blue-300">
-                  <td colSpan="2" className="py-3 border-r dark:border-slate-600"><i className="fa-solid fa-flask mr-1"></i> 학교 자율시간</td>
+                <tr className="bg-blue-50/30 dark:bg-blue-900/20 font-bold text-blue-800 dark:text-blue-300 border-y-2 border-slate-200 dark:border-slate-600">
+                  <td colSpan="2" className="py-3 border-r dark:border-slate-700"><i className="fa-solid fa-flask mr-1"></i> 학교 자율시간 누계</td>
                   {[1,2,3,4,5,6].map(g => {
-                    const val = getAutoTimeVal(g);
-                    return <td key={g} className="py-3 border-r dark:border-slate-600">{val === 0 ? '-' : val}</td>;
+                    const isErrLeft = (g===1 && err12) || (g===3 && err34) || (g===5 && err56);
+                    const isErrRight = (g===2 && err12) || (g===4 && err34) || (g===6 && err56);
+                    const errClass = (isErrLeft ? 'border-l-2 border-b-2 border-red-500 ' : '') + (isErrRight ? 'border-r-2 border-b-2 border-red-500 ' : '');
+                    return <td key={g} className={`py-3 border-r dark:border-slate-700 ${errClass}`}>{getAutoTimeVal(g) === 0 ? '-' : getAutoTimeVal(g)}</td>
                   })}
                 </tr>
               </tbody>
@@ -520,184 +604,18 @@
       );
     }
 
-    /** 메인 편집 편제표 (자율시간 팝업 로직 반영 및 물 흐르는 효과) */
-    function CurriculumScreen({ analysis, allHours, handleInput, autoTimes, openModal, handleAutoTimeHours, deleteAutoTime }) {
-      const [g1, g2] = analysis.grades;
-
-      return (
-        <div className="flex-grow flex flex-col gap-4 overflow-hidden">
-          <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-sm rounded-xl overflow-y-auto custom-scrollbar flex-grow pb-8">
-            <table className="w-full border-collapse">
-              <thead className="bg-slate-100 dark:bg-slate-900 border-b-2 border-slate-300 dark:border-slate-700 sticky top-0 z-10">
-                <tr className="text-[13px] font-bold text-slate-600 dark:text-slate-300 text-center">
-                  <th className="py-2 px-2 border-r dark:border-slate-700 w-24">교과군</th>
-                  <th className="py-2 px-2 border-r dark:border-slate-700 w-28">교과목</th>
-                  <th colSpan={3} className="py-2 px-2 border-r dark:border-slate-700 bg-blue-50/80 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300">{g1}학년</th>
-                  <th colSpan={3} className="py-2 px-2 border-r dark:border-slate-700 bg-emerald-50/80 dark:bg-emerald-900/30 text-emerald-800 dark:text-emerald-300">{g2}학년</th>
-                  <th className="py-2 px-2 border-r dark:border-slate-700 w-16">기준</th>
-                  <th className="py-2 px-2 border-r dark:border-slate-700 w-16">합계</th>
-                  <th className="py-2 px-2 w-20">증감(%)</th>
-                </tr>
-                <tr className="text-[11px] font-bold text-slate-500 dark:text-slate-400 text-center bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                  <th className="py-1.5 border-r dark:border-slate-700"></th>
-                  <th className="py-1.5 border-r dark:border-slate-700"></th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-[4.5rem]">1학기</th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-[4.5rem]">2학기</th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-12 bg-slate-50 dark:bg-slate-900">소계</th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-[4.5rem]">1학기</th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-[4.5rem]">2학기</th>
-                  <th className="py-1.5 border-r dark:border-slate-700 w-12 bg-slate-50 dark:bg-slate-900">소계</th>
-                  <th className="py-1.5 border-r dark:border-slate-700"></th>
-                  <th className="py-1.5 border-r dark:border-slate-700"></th>
-                  <th className="py-1.5"></th>
-                </tr>
-              </thead>
-              
-              {analysis.groupStats.map((group) => {
-                const hasError = group.isOver20 || group.isUnder20;
-                const tbodyClass = hasError ? "error-pulse border-2 bg-red-50/10 dark:bg-red-900/20 relative z-0" : "border-b border-slate-200 dark:border-slate-700";
-                const groupAutoTimes = autoTimes.filter(a => group.subjects.includes(a.linkedSub) && (a.grade === g1 || a.grade === g2));
-                const rowSpanCount = group.subjects.length + groupAutoTimes.length;
-
-                return (
-                  <tbody key={group.id} className={`text-center text-[13px] ${tbodyClass}`}>
-                    {group.subjects.map((sub, idx) => {
-                      const g1s1 = allHours[g1][sub].s1; const g1s2 = allHours[g1][sub].s2;
-                      const g2s1 = allHours[g2][sub].s1; const g2s2 = allHours[g2][sub].s2;
-                      const subTotal1 = g1s1 + g1s2; const subTotal2 = g2s1 + g2s2;
-                      const subAutoTimes = autoTimes.filter(a => a.linkedSub === sub && (a.grade === g1 || a.grade === g2));
-
-                      return (
-                        <React.Fragment key={sub}>
-                          <tr className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors border-b border-slate-100 dark:border-slate-700/50">
-                            {idx === 0 && (
-                              <td rowSpan={rowSpanCount} className="p-2 border-r dark:border-slate-700 align-middle bg-slate-50/50 dark:bg-slate-900/50">
-                                <span className={`font-bold leading-tight ${hasError ? 'text-red-600' : 'text-slate-700 dark:text-slate-300'}`}>{group.name}</span>
-                              </td>
-                            )}
-                            <td className="p-2 border-r dark:border-slate-700 font-bold text-slate-700 dark:text-slate-300 text-[12px]">{SUBJECT_NAME[sub]}</td>
-                            {renderInputCell(g1, sub, 's1', g1s1, handleInput)}
-                            {renderInputCell(g1, sub, 's2', g1s2, handleInput)}
-                            <td className="p-2 border-r dark:border-slate-700 font-bold text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-900/50 text-[11px]">{subTotal1}</td>
-                            {renderInputCell(g2, sub, 's1', g2s1, handleInput)}
-                            {renderInputCell(g2, sub, 's2', g2s2, handleInput)}
-                            <td className="p-2 border-r dark:border-slate-700 font-bold text-slate-400 dark:text-slate-500 bg-slate-50/50 dark:bg-slate-900/50 text-[11px]">{subTotal2}</td>
-                            {idx === 0 && (
-                              <>
-                                <td rowSpan={rowSpanCount} className="p-2 border-r dark:border-slate-700 align-middle text-slate-500 font-bold">{group.std}</td>
-                                <td rowSpan={rowSpanCount} className={`p-2 border-r dark:border-slate-700 align-middle font-black text-[15px] ${hasError ? 'text-red-600' : 'text-blue-700 dark:text-blue-400'}`}>{group.current}</td>
-                                <td rowSpan={rowSpanCount} className={`p-2 align-middle font-bold text-[12px] ${hasError ? 'text-red-600' : 'text-slate-500 dark:text-slate-400'}`}>
-                                  {group.diff > 0 ? `+${group.diff}` : group.diff}
-                                  {group.std !== 0 && <div className="text-[10px] font-normal opacity-70 mt-0.5">({group.variancePercent}%)</div>}
-                                </td>
-                              </>
-                            )}
-                          </tr>
-                          
-                          {/* 💡 학교 자율시간 서브로우 */}
-                          {subAutoTimes.map(aTime => {
-                             const text = `[${aTime.grade}학년] ${aTime.name}`;
-                             const isLong = text.length > 10;
-
-                             return (
-                              <tr key={aTime.id} className="bg-blue-50/30 dark:bg-blue-900/20 hover:bg-blue-50/60 dark:hover:bg-blue-900/40 transition-colors border-b border-slate-100 dark:border-slate-700/50">
-                                <td className="p-2 border-r dark:border-slate-700 text-left relative group/subrow h-[36px]">
-                                  <div className="flex items-center justify-between h-full">
-                                    <div className={isLong ? 'marquee-container h-full pt-1' : 'px-1'}>
-                                      <div className={`text-[11px] font-bold text-blue-700 dark:text-blue-400 ${isLong ? 'marquee-content' : ''}`}>
-                                        <span className="text-slate-400 dark:text-slate-500 mr-1">└</span>{text}
-                                      </div>
-                                    </div>
-                                    <div className="flex gap-1 opacity-0 group-hover/subrow:opacity-100 transition-opacity bg-white dark:bg-slate-800 rounded px-1.5 py-0.5 shadow-sm absolute right-1 z-10">
-                                      <button onClick={(e) => { e.stopPropagation(); openModal(aTime.grade, aTime.id); }} className="text-slate-400 hover:text-blue-600 p-1"><i className="fa-solid fa-pen text-[10px]"></i></button>
-                                      <button onClick={(e) => { e.stopPropagation(); deleteAutoTime(e, aTime.id); }} className="text-slate-400 hover:text-red-600 p-1"><i className="fa-solid fa-xmark text-[10px]"></i></button>
-                                    </div>
-                                  </div>
-                                </td>
-                                {aTime.grade === g1 ? (
-                                  <>
-                                    {renderSubInputCell(aTime.id, 's1', aTime.s1, handleAutoTimeHours)}
-                                    {renderSubInputCell(aTime.id, 's2', aTime.s2, handleAutoTimeHours)}
-                                    <td className="p-2 border-r dark:border-slate-700 font-bold text-blue-500 dark:text-blue-400 bg-blue-50/30 dark:bg-blue-900/30 text-[11px]">{aTime.s1 + aTime.s2}</td>
-                                    <td colSpan={3} className="p-2 border-r dark:border-slate-700 bg-slate-100/50 dark:bg-slate-900/50"></td>
-                                  </>
-                                ) : (
-                                  <>
-                                    <td colSpan={3} className="p-2 border-r dark:border-slate-700 bg-slate-100/50 dark:bg-slate-900/50"></td>
-                                    {renderSubInputCell(aTime.id, 's1', aTime.s1, handleAutoTimeHours)}
-                                    {renderSubInputCell(aTime.id, 's2', aTime.s2, handleAutoTimeHours)}
-                                    <td className="p-2 border-r dark:border-slate-700 font-bold text-blue-500 dark:text-blue-400 bg-blue-50/30 dark:bg-blue-900/30 text-[11px]">{aTime.s1 + aTime.s2}</td>
-                                  </>
-                                )}
-                              </tr>
-                             );
-                          })}
-                        </React.Fragment>
-                      );
-                    })}
-                  </tbody>
-                );
-              })}
-            </table>
-          </div>
-          
-          <div className="flex gap-4 p-4 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl shadow-sm shrink-0">
-            <button onClick={() => openModal(g1)} className="flex-1 py-2.5 border border-dashed border-blue-400 text-blue-600 dark:text-blue-400 font-bold rounded-lg text-sm hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors">
-              <i className="fa-solid fa-plus mr-1"></i> {g1}학년 학교 자율시간 추가
-            </button>
-            <button onClick={() => openModal(g2)} className="flex-1 py-2.5 border border-dashed border-emerald-500 text-emerald-600 dark:text-emerald-400 font-bold rounded-lg text-sm hover:bg-emerald-50 dark:hover:bg-emerald-900/30 transition-colors">
-              <i className="fa-solid fa-plus mr-1"></i> {g2}학년 학교 자율시간 추가
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    // 메인 과목 입력 셀
-    function renderInputCell(grade, sub, sem, value, handler) {
-      return (
-        <td className="py-1 px-1.5 border-r dark:border-slate-700 align-middle">
-          <div className="relative flex items-center justify-center w-[4.5rem] mx-auto border border-slate-200 dark:border-slate-600 rounded shadow-sm bg-white dark:bg-slate-700 hover:border-blue-400 transition-colors">
-            <input type="number" value={value === 0 ? '' : value} onChange={(e) => handler(grade, sub, sem, e.target.value)} placeholder="0"
-              className="w-full text-center font-bold text-[13px] bg-transparent focus:outline-none focus:bg-yellow-50 dark:focus:bg-slate-600 py-1 pr-4 pl-1" />
-            <div className="absolute right-0 top-0 bottom-0 w-4 flex flex-col border-l border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800">
-              <button onClick={() => handler(grade, sub, sem, (value === '' ? 0 : value) + 1)} className="h-1/2 w-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-blue-600 flex justify-center items-center border-b border-slate-200 dark:border-slate-600"><i className="fa-solid fa-caret-up text-[10px]"></i></button>
-              <button onClick={() => handler(grade, sub, sem, Math.max(0, (value === '' ? 0 : value) - 1))} className="h-1/2 w-full text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600 hover:text-blue-600 flex justify-center items-center"><i className="fa-solid fa-caret-down text-[10px]"></i></button>
-            </div>
-          </div>
-        </td>
-      );
-    }
-
-    // 자율시간 서브로우 전용 입력 셀
-    function renderSubInputCell(id, sem, value, handler) {
-      return (
-        <td className="py-1 px-1.5 border-r dark:border-slate-700 align-middle bg-blue-50/10 dark:bg-blue-900/10">
-          <div className="relative flex items-center justify-center w-[4rem] mx-auto border border-blue-200 dark:border-blue-800 rounded overflow-hidden bg-white dark:bg-slate-700 hover:border-blue-400">
-            <input type="number" value={value === 0 ? '' : value} onChange={(e) => handler(id, sem, e.target.value)} placeholder="0"
-              className="w-full text-center font-bold text-[12px] text-blue-700 dark:text-blue-300 bg-transparent focus:outline-none focus:bg-yellow-50 dark:focus:bg-slate-600 py-1 pr-3 pl-1" />
-            <div className="absolute right-0 top-0 bottom-0 w-3.5 flex flex-col border-l border-blue-100 dark:border-blue-800 bg-blue-50 dark:bg-slate-800">
-              <button onClick={() => handler(id, sem, (value === '' ? 0 : value) + 1)} className="h-1/2 text-blue-400 hover:bg-blue-200 dark:hover:bg-slate-600 border-b border-blue-100 dark:border-blue-800 flex justify-center items-center"><i className="fa-solid fa-caret-up text-[9px]"></i></button>
-              <button onClick={() => handler(id, sem, Math.max(0, (value === '' ? 0 : value) - 1))} className="h-1/2 text-blue-400 hover:bg-blue-200 dark:hover:bg-slate-600 flex justify-center items-center"><i className="fa-solid fa-caret-down text-[9px]"></i></button>
-            </div>
-          </div>
-        </td>
-      );
-    }
-
-    // 시스템 설정 (다크모드)
     function SettingsScreen({ isDarkMode, setIsDarkMode }) {
       return (
-        <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in pt-8">
-          <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700">
-            <h3 className="text-xl font-black mb-6 border-b dark:border-slate-700 pb-4"><i className="fa-solid fa-gear mr-2 text-blue-500"></i> 시스템 설정</h3>
-            <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-700">
+        <div className="max-w-2xl mx-auto space-y-4 pt-6">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+            <h3 className="text-lg font-black mb-4 border-b dark:border-slate-700 pb-3"><i className="fa-solid fa-gear mr-2 text-blue-500"></i> 환경 설정</h3>
+            <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
               <div>
-                <p className="font-bold text-slate-800 dark:text-slate-200">어두운 테마 (Dark Mode)</p>
-                <p className="text-sm text-slate-500 mt-1">눈의 피로를 덜어주는 어두운 배경 모드를 활성화합니다.</p>
+                <span className="text-sm font-bold text-slate-800 dark:text-slate-200">다크 모드 (어두운 테마)</span>
+                <p className="text-xs text-slate-500 mt-1">눈의 피로를 덜어주는 어두운 배경을 적용합니다.</p>
               </div>
-              <button onClick={() => setIsDarkMode(!isDarkMode)} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${isDarkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
-                <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isDarkMode ? 'translate-x-6' : 'translate-x-1'}`} />
+              <button onClick={() => setIsDarkMode(!isDarkMode)} className={`w-12 h-6 rounded-full transition-colors relative ${isDarkMode ? 'bg-blue-600' : 'bg-slate-300'}`}>
+                <span className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${isDarkMode ? 'translate-x-6' : ''}`}></span>
               </button>
             </div>
           </div>
@@ -705,30 +623,21 @@
       );
     }
 
-    function DashboardScreen({ analysisAll }) {
+    function DashboardScreen() {
       return (
-        <div className="max-w-6xl mx-auto grid grid-cols-3 gap-6 animate-in fade-in h-full">
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 h-36">
-            <p className="text-[11px] font-bold text-slate-400 uppercase">전체 진행률</p>
-            <p className="text-3xl font-black mt-2">85%</p>
+        <div className="max-w-4xl mx-auto grid grid-cols-3 gap-6 pt-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+            <p className="text-xs font-bold text-slate-400">전체 진행률</p>
+            <p className="text-3xl font-black mt-2">100%</p>
           </div>
-          {analysisAll.hasAnyGlobalError && (
-             <div className="col-span-2 bg-red-50 dark:bg-red-900/30 p-6 rounded-2xl shadow-sm border border-red-200 dark:border-red-800 h-36 flex items-center gap-4">
-              <i className="fa-solid fa-triangle-exclamation text-4xl text-red-500"></i>
-              <div>
-                <p className="font-bold text-red-600 dark:text-red-400">시스템 알림: 법정 시수 결함 감지</p>
-                <p className="text-sm text-red-500 dark:text-red-300 mt-1">전체보기 탭을 확인하여 붉은색으로 점멸하는 학년군의 오류를 수정하세요.</p>
-              </div>
-            </div>
-          )}
         </div>
       );
     }
 
     function MenuBtn({ icon, label, active, onClick }) {
       return (
-        <button onClick={onClick} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all ${active ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
-          <i className={`fa-solid ${icon} w-5 text-center text-[13px]`}></i> <span className="text-[13px] font-bold">{label}</span>
+        <button onClick={onClick} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}>
+          <i className={`fa-solid ${icon} w-5 text-center text-sm`}></i> <span className="text-sm font-bold">{label}</span>
         </button>
       );
     }
